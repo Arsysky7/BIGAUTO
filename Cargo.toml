@@ -1,0 +1,103 @@
+# BIG AUTO - Marketplace Rental & Jual Beli Mobil
+# Root Cargo Workspace Configuration
+
+[workspace]
+resolver = "2"
+
+# Daftar semua service yang ada di project
+members = [
+    "services/auth-service",
+    "services/user-service",
+    "services/vehicle-service",
+    "services/booking-service",
+    "services/payment-service",
+    "services/chat-service",
+    "services/notification-service",
+    "services/financial-service",
+    "shared",
+]
+
+# Shared dependencies untuk semua services
+# Benefit: Versi library consistent, compile lebih cepat
+[workspace.dependencies]
+# Web Framework
+axum = "0.8.6"
+axum-extra = { version = "0.12.0", features = ["cookie"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+time = "0.3"
+
+# Async Runtime
+tokio = { version = "1.42", features = ["full"] }
+
+# Database ORM (PostgreSQL)
+sqlx = { version = "0.8", features = [
+    "runtime-tokio-rustls",
+    "postgres",
+    "macros",
+    "migrate",
+    "chrono",
+    "uuid",
+] }
+
+# Serialization/Deserialization (JSON)
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Authentication & Security
+jsonwebtoken = { version = "10.1.0", features = ["rust_crypto"] }
+argon2 = "0.5.3"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+rand = "0.9.2"
+rand_core = "0.9.3"
+sha1 = "0.10" # For Cloudinary signature generation
+
+# Environment Variables
+dotenvy = "0.15"
+
+# Error Handling
+anyhow = "1.0"
+thiserror = "2.0.17"
+
+# Date & Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# HTTP Client (untuk external API calls & Cloudinary)
+reqwest = { version = "0.12", features = ["json", "multipart"] }
+
+# Logging & Tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Validation
+validator = { version = "0.20", features = ["derive"] }
+regex = "1.10"
+
+# API Documentation (Swagger/OpenAPI)
+utoipa = { version = "5.4", features = ["axum_extras", "chrono", "uuid"] }
+utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
+utoipa-redoc = { version = "6", features = ["axum"] }
+
+# NATS (Message Broker for real-time chat)
+async-nats = "0.44.2"
+
+# Email Service
+lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "smtp-transport", "builder"] }
+
+# Redis (optional - untuk rate limiting & caching)
+redis = { version = "0.32.7", features = ["tokio-comp", "connection-manager"] }
+
+# Testing
+mockall = "0.13"
+
+[profile.dev]
+# Development profile (faster compile, larger binary)
+opt-level = 0
+debug = true
+
+[profile.release]
+# Production profile (slower compile, optimized binary)
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

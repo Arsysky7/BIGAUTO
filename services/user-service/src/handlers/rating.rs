@@ -1,0 +1,394 @@
+use axum::{
+    extract::{Path, Query, State},
+    Json,
+};
+use serde::{Deserialize, Serialize};
+use shared::utils::validation;
+use sqlx::PgPool;
+use utoipa::{IntoParams, ToSchema};
+
+use crate::{
+    config::AppConfig,
+    domain::review::{CreateReviewRequest, Review, ReviewWithCustomer, SellerRatingSummary, RatingDistribution},
+    error::AppError,
+    middleware::{AuthUser, AuthSeller},
+};
+
+// Query parameters untuk pagination
+#[derive(Debug, Deserialize, IntoParams)]
+pub struct ReviewQueryParams {
+    #[serde(default = "default_page")]
+    pub page: i64,
+    #[serde(default = "default_limit")]
+    pub limit: i64,
+}
+
+fn default_page() -> i64 { 1 }
+fn default_limit() -> i64 { 10 }
+
+// Response sukses untuk submit review
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SubmitReviewResponse {
+    pub message: String,
+    pub review_id: i32,
+}
+
+// Submit review untuk seller setelah transaksi selesai
+#[utoipa::path(
+    post,
+    path = "/api/sellers/{seller_id}/reviews",
+    tag = "Ratings",
+    security(("bearer_auth" = [])),
+    request_body = CreateReviewRequest,
+    params(
+        ("seller_id" = i32, Path, description = "Seller ID")
+    ),
+    responses(
+        (status = 200, description = "Review berhasil disubmit", body = SubmitReviewResponse),
+        (status = 400, description = "Input tidak valid"),
+        (status = 401, description = "Unauthorized"),
+        (status = 422, description = "Spam prevention limit reached (production)"),
+    )
+)]
+pub async fn submit_review(
+    auth: AuthUser,
+    Path(seller_id): Path<i32>,
+    State(pool): State<PgPool>,
+    State(config): State<AppConfig>,
+    Json(req): Json<CreateReviewRequest>,
+) -> Result<Json<SubmitReviewResponse>, AppError> {
+    // Log untuk audit trail
+    tracing::info!(
+        "User {} ({}) submitting review for seller {}",
+        auth.email,
+        auth.role,
+        seller_id
+    );
+
+    // Strict validation: prevent spam reviews di production
+    if config.strict_validation() {
+        let today_reviews = count_user_reviews_today(&pool, auth.user_id).await?;
+        const MAX_REVIEWS_PER_DAY: i64 = 10;
+
+        if today_reviews >= MAX_REVIEWS_PER_DAY {
+            return Err(AppError::validation(format!(
+                "Maksimal {} reviews per hari (production mode untuk prevent spam)",
+                MAX_REVIEWS_PER_DAY
+            )));
+        }
+    }
+
+    // Validasi overall rating wajib 1-5
+    if !validation::is_valid_rating(req.overall_rating) {
+        return Err(AppError::validation("Overall rating harus antara 1-5"));
+    }
+
+    // Validasi detail ratings jika ada
+    if let Some(rating) = req.vehicle_condition_rating {
+        if !validation::is_valid_rating(rating) {
+            return Err(AppError::validation("Vehicle condition rating harus antara 1-5"));
+        }
+    }
+
+    if let Some(rating) = req.accuracy_rating {
+        if !validation::is_valid_rating(rating) {
+            return Err(AppError::validation("Accuracy rating harus antara 1-5"));
+        }
+    }
+
+    if let Some(rating) = req.service_rating {
+        if !validation::is_valid_rating(rating) {
+            return Err(AppError::validation("Service rating harus antara 1-5"));
+        }
+    }
+
+    // Insert review ke database
+    let review_id = insert_review(&pool, auth.user_id, seller_id, req).await?;
+
+    Ok(Json(SubmitReviewResponse {
+        message: "Review berhasil disubmit".to_string(),
+        review_id,
+    }))
+}
+
+// Ambil semua ratings untuk seller
+#[utoipa::path(
+    get,
+    path = "/api/sellers/{seller_id}/ratings",
+    tag = "Ratings",
+    params(
+        ("seller_id" = i32, Path, description = "Seller ID"),
+        ReviewQueryParams
+    ),
+    responses(
+        (status = 200, description = "List ratings berhasil diambil", body = Vec<ReviewWithCustomer>),
+        (status = 404, description = "Seller tidak ditemukan"),
+    )
+)]
+pub async fn get_seller_ratings(
+    Path(seller_id): Path<i32>,
+    Query(params): Query<ReviewQueryParams>,
+    State(pool): State<PgPool>,
+) -> Result<Json<Vec<ReviewWithCustomer>>, AppError> {
+    let offset = (params.page - 1) * params.limit;
+    let reviews = fetch_seller_reviews(&pool, seller_id, params.limit, offset).await?;
+    Ok(Json(reviews))
+}
+
+// Ambil rating summary untuk seller (average, distribution, dll)
+#[utoipa::path(
+    get,
+    path = "/api/sellers/{seller_id}/rating-summary",
+    tag = "Ratings",
+    params(
+        ("seller_id" = i32, Path, description = "Seller ID")
+    ),
+    responses(
+        (status = 200, description = "Rating summary berhasil diambil", body = SellerRatingSummary),
+        (status = 404, description = "Seller tidak ditemukan"),
+    )
+)]
+pub async fn get_seller_rating_summary(
+    Path(seller_id): Path<i32>,
+    State(pool): State<PgPool>,
+) -> Result<Json<SellerRatingSummary>, AppError> {
+    let summary = calculate_rating_summary(&pool, seller_id).await?;
+    Ok(Json(summary))
+}
+
+// Seller melihat reviews mereka sendiri (seller-only endpoint)
+#[utoipa::path(
+    get,
+    path = "/api/sellers/me/reviews",
+    tag = "Ratings",
+    security(("bearer_auth" = [])),
+    params(
+        ReviewQueryParams
+    ),
+    responses(
+        (status = 200, description = "List reviews yang diterima seller", body = Vec<ReviewWithCustomer>),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "User bukan seller"),
+    )
+)]
+pub async fn get_my_seller_reviews(
+    auth: AuthSeller,
+    Query(params): Query<ReviewQueryParams>,
+    State(pool): State<PgPool>,
+) -> Result<Json<Vec<ReviewWithCustomer>>, AppError> {
+    // Log untuk audit trail
+    tracing::info!(
+        "Seller {} viewing their reviews",
+        auth.email
+    );
+
+    let offset = (params.page - 1) * params.limit;
+    let reviews = fetch_seller_reviews(&pool, auth.user_id, params.limit, offset).await?;
+    Ok(Json(reviews))
+}
+
+// === Helper Functions ===
+
+// Count reviews yang dibuat user hari ini (untuk spam prevention)
+async fn count_user_reviews_today(pool: &PgPool, customer_id: i32) -> Result<i64, AppError> {
+    let count: (i64,) = sqlx::query_as(
+        r#"
+        SELECT COUNT(*)
+        FROM reviews
+        WHERE customer_id = $1
+          AND DATE(created_at) = CURRENT_DATE
+        "#
+    )
+    .bind(customer_id)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(count.0)
+}
+
+// Fetch reviews seller dengan customer info
+async fn fetch_seller_reviews(
+    pool: &PgPool,
+    seller_id: i32,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<ReviewWithCustomer>, AppError> {
+    #[derive(sqlx::FromRow)]
+    struct ReviewRow {
+        id: i32,
+        overall_rating: i32,
+        vehicle_condition_rating: Option<i32>,
+        accuracy_rating: Option<i32>,
+        service_rating: Option<i32>,
+        comment: Option<String>,
+        photos: Option<String>,
+        created_at: chrono::DateTime<chrono::Utc>,
+        customer_id: i32,
+        customer_name: String,
+        customer_photo: Option<String>,
+    }
+
+    let rows = sqlx::query_as::<_, ReviewRow>(
+        r#"
+        SELECT
+            r.id,
+            r.overall_rating,
+            r.vehicle_condition_rating,
+            r.accuracy_rating,
+            r.service_rating,
+            r.comment,
+            r.photos::text AS photos,
+            r.created_at,
+            r.customer_id,
+            u.name AS customer_name,
+            u.profile_photo AS customer_photo
+        FROM reviews r
+        INNER JOIN users u ON r.customer_id = u.id
+        WHERE r.seller_id = $1 AND r.is_visible = true
+        ORDER BY r.created_at DESC
+        LIMIT $2 OFFSET $3
+        "#
+    )
+    .bind(seller_id)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(pool)
+    .await?;
+
+    let reviews = rows
+        .into_iter()
+        .map(|row| ReviewWithCustomer {
+            id: row.id,
+            overall_rating: row.overall_rating,
+            vehicle_condition_rating: row.vehicle_condition_rating,
+            accuracy_rating: row.accuracy_rating,
+            service_rating: row.service_rating,
+            comment: row.comment,
+            photos: row.photos.and_then(|s| serde_json::from_str(&s).ok()),
+            created_at: row.created_at,
+            customer_id: row.customer_id,
+            customer_name: row.customer_name,
+            customer_photo: row.customer_photo,
+        })
+        .collect();
+
+    Ok(reviews)
+}
+
+// Hitung rating summary untuk seller
+async fn calculate_rating_summary(
+    pool: &PgPool,
+    seller_id: i32,
+) -> Result<SellerRatingSummary, AppError> {
+    // Aggregate rating stats
+    let stats: Option<(i64, f64, Option<f64>, Option<f64>, Option<f64>)> = sqlx::query_as(
+        r#"
+        SELECT
+            COUNT(*)::BIGINT as total_reviews,
+            COALESCE(AVG(overall_rating), 0) as average_rating,
+            AVG(vehicle_condition_rating) as avg_vehicle_condition,
+            AVG(accuracy_rating) as avg_accuracy,
+            AVG(service_rating) as avg_service
+        FROM reviews
+        WHERE seller_id = $1 AND is_visible = true
+        "#
+    )
+    .bind(seller_id)
+    .fetch_optional(pool)
+    .await?;
+
+    let (total_reviews, average_rating, avg_vehicle, avg_accuracy, avg_service) =
+        stats.unwrap_or((0, 0.0, None, None, None));
+
+    // Rating distribution (1-5 star counts)
+    let distribution = calculate_rating_distribution(pool, seller_id).await?;
+
+    Ok(SellerRatingSummary {
+        seller_id,
+        total_reviews,
+        average_rating: (average_rating * 10.0).round() / 10.0,
+        rating_distribution: distribution,
+        average_vehicle_condition: avg_vehicle.map(|v| (v * 10.0).round() / 10.0),
+        average_accuracy: avg_accuracy.map(|v| (v * 10.0).round() / 10.0),
+        average_service: avg_service.map(|v| (v * 10.0).round() / 10.0),
+    })
+}
+
+// Hitung distribusi rating 1-5 bintang
+async fn calculate_rating_distribution(
+    pool: &PgPool,
+    seller_id: i32,
+) -> Result<RatingDistribution, AppError> {
+    let counts: Vec<(i32, i64)> = sqlx::query_as(
+        r#"
+        SELECT overall_rating, COUNT(*)::BIGINT
+        FROM reviews
+        WHERE seller_id = $1 AND is_visible = true
+        GROUP BY overall_rating
+        "#
+    )
+    .bind(seller_id)
+    .fetch_all(pool)
+    .await?;
+
+    let mut distribution = RatingDistribution {
+        five_star: 0,
+        four_star: 0,
+        three_star: 0,
+        two_star: 0,
+        one_star: 0,
+    };
+
+    for (rating, count) in counts {
+        match rating {
+            5 => distribution.five_star = count,
+            4 => distribution.four_star = count,
+            3 => distribution.three_star = count,
+            2 => distribution.two_star = count,
+            1 => distribution.one_star = count,
+            _ => {}
+        }
+    }
+
+    Ok(distribution)
+}
+
+// Insert review baru ke database
+async fn insert_review(
+    pool: &PgPool,
+    customer_id: i32,
+    seller_id: i32,
+    req: CreateReviewRequest,
+) -> Result<i32, AppError> {
+    // Serialize photos array ke JSONB
+    let photos_json = req.photos.as_ref().map(|p| serde_json::to_value(p).unwrap());
+
+    let review = sqlx::query_as::<_, Review>(
+        r#"
+        INSERT INTO reviews (
+            customer_id,
+            seller_id,
+            vehicle_id,
+            overall_rating,
+            vehicle_condition_rating,
+            accuracy_rating,
+            service_rating,
+            comment,
+            photos
+        ) VALUES ($1, $2, 0, $3, $4, $5, $6, $7, $8)
+        RETURNING *
+        "#
+    )
+    .bind(customer_id)
+    .bind(seller_id)
+    .bind(req.overall_rating)
+    .bind(req.vehicle_condition_rating)
+    .bind(req.accuracy_rating)
+    .bind(req.service_rating)
+    .bind(req.comment)
+    .bind(photos_json)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(review.id)
+}

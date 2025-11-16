@@ -1,0 +1,39 @@
+[package]
+name = "shared"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# HTTP Client
+reqwest = { workspace = true }
+
+# Web Framework (for auth middleware)
+axum = { workspace = true }
+tokio = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Security
+sha1 = { workspace = true }
+uuid = { workspace = true }
+jsonwebtoken = { workspace = true }
+
+# Utilities
+chrono = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Environment
+dotenvy = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Validation
+regex = { workspace = true }
+
+[lib]
+name = "shared"
+path = "src/lib.rs"
