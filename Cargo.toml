@@ -8,12 +8,6 @@ resolver = "2"
 members = [
     "services/auth-service",
     "services/user-service",
-    "services/vehicle-service",
-    "services/booking-service",
-    "services/payment-service",
-    "services/chat-service",
-    "services/notification-service",
-    "services/financial-service",
     "shared",
 ]
 
