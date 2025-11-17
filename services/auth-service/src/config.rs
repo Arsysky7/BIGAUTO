@@ -72,12 +72,12 @@ pub async fn init_db_pool(database_url: &str) -> Result<PgPool, sqlx::Error> {
     tracing::info!("Menghubungkan ke database PostgreSQL...");
 
     let pool = PgPoolOptions::new()
-        .max_connections(1)          
-        .min_connections(0)          
-        .acquire_timeout(Duration::from_secs(30))  
-        .idle_timeout(Duration::from_secs(600))    
-        .max_lifetime(Duration::from_secs(1800))   
-        .connect(database_url)
+        .max_connections(1)
+        .min_connections(0)
+        .acquire_timeout(Duration::from_secs(30))
+        .idle_timeout(Duration::from_secs(600))
+        .max_lifetime(Duration::from_secs(1800))
+                .connect(database_url)
         .await?;
 
     tracing::info!("Koneksi database berhasil dibuat");
