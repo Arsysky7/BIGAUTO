@@ -69,11 +69,15 @@ async fn main() -> AppResult<()> {
         tracing::warn!("⚠️ Some services are not fully healthy: {:?}", health);
     }
 
-    // Start background cleanup scheduler
-    tracing::info!("🔄 Starting background cleanup scheduler...");
-    let cleanup_scheduler = scheduler::CleanupScheduler::new(state.clone());
-    cleanup_scheduler.start();
-    tracing::info!("✅ Background cleanup scheduler started");
+    // Start background cleanup scheduler (disabled in Railway)
+    if std::env::var("DISABLE_SCHEDULER").unwrap_or_default() != "true" {
+        tracing::info!("🔄 Starting background cleanup scheduler...");
+        let cleanup_scheduler = scheduler::CleanupScheduler::new(state.clone());
+        cleanup_scheduler.start();
+        tracing::info!("✅ Background cleanup scheduler started");
+    } else {
+        tracing::warn!("⚠️  Background cleanup scheduler disabled");
+    }
 
     // Create application router with all routes
     let app = create_app(state);
