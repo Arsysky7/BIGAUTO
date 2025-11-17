@@ -7,34 +7,24 @@ use crate::utils::validation;
 // Struktur data response profile user
 #[derive(Debug, serde::Serialize, utoipa::ToSchema)]
 pub struct ProfileResponse {
-    /// User ID
     #[schema(example = 1)]
     pub id: i32,
-    /// Email address
     #[schema(example = "john@example.com")]
     pub email: String,
-    /// Nama lengkap
     #[schema(example = "John Doe")]
     pub name: String,
-    /// Nomor telepon
     #[schema(example = "+6281234567890")]
     pub phone: String,
-    /// Status sebagai seller
     #[schema(example = false)]
     pub is_seller: bool,
-    /// Alamat lengkap
     #[schema(example = "Jl. Sudirman No. 123")]
     pub address: Option<String>,
-    /// Kota
     #[schema(example = "Jakarta")]
     pub city: Option<String>,
-    /// URL foto profile
     #[schema(example = "https://example.com/photos/profile.jpg")]
     pub profile_photo: Option<String>,
-    /// Nama bisnis (untuk seller)
     #[schema(example = "Toko Mobil Sejahtera")]
     pub business_name: Option<String>,
-    /// Status verifikasi email
     #[schema(example = true)]
     pub email_verified: bool,
 }
