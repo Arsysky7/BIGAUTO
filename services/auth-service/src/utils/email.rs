@@ -1,43 +1,31 @@
-use lettre::{
-    message::{Message, MultiPart, SinglePart},
-    transport::smtp::authentication::Credentials,
-    SmtpTransport, Transport,
-};
+use serde_json::json;
 use std::env;
 
+#[derive(Debug, Clone)]
 pub struct EmailConfig {
-    pub smtp_host: String,
-    pub smtp_port: u16,
-    pub smtp_username: String,
-    pub smtp_password: String,
+    pub resend_api_key: String,
     pub email_from: String,
-    pub email_from_name: String,
 }
 
 impl EmailConfig {
     // Load konfigurasi email dari environment variables
     pub fn from_env() -> Result<Self, crate::error::AppError> {
         Ok(EmailConfig {
-            smtp_host: env::var("SMTP_HOST").map_err(|_| crate::error::AppError::email("SMTP_HOST tidak ditemukan"))?,
-            smtp_port: env::var("SMTP_PORT")
-                .ok()
-                .and_then(|p| p.parse().ok())
-                .unwrap_or(587),
-            smtp_username: env::var("SMTP_USERNAME").map_err(|_| crate::error::AppError::email("SMTP_USERNAME tidak ditemukan"))?,
-            smtp_password: env::var("SMTP_PASSWORD").map_err(|_| crate::error::AppError::email("SMTP_PASSWORD tidak ditemukan"))?,
-            email_from: env::var("EMAIL_FROM").map_err(|_| crate::error::AppError::email("EMAIL_FROM tidak ditemukan"))?,
-            email_from_name: env::var("EMAIL_FROM_NAME").unwrap_or_else(|_| "Big Auto".to_string()),
+            resend_api_key: env::var("RESEND_API_KEY").map_err(|_| crate::error::AppError::email("RESEND_API_KEY tidak ditemukan"))?,
+            email_from: env::var("RESEND_FROM_EMAIL").unwrap_or_else(|_| "onboarding@resend.dev".to_string()),
         })
     }
 }
 
-// Kirim email verifikasi dengan link aktivasi akun
-pub fn send_verification_email(
+// Kirim email verifikasi dengan link aktivasi akun menggunakan Resend API
+pub async fn send_verification_email(
+    http_client: &reqwest::Client,
+    api_key: &str,
+    from_email: &str,
     to_email: &str,
     to_name: &str,
     verification_token: &str,
 ) -> Result<(), crate::error::AppError> {
-    let config = EmailConfig::from_env()?;
     let verification_link = format!(
         "{}/api/auth/verify-email?token={}",
         env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:3000".to_string()),
@@ -86,17 +74,25 @@ pub fn send_verification_email(
         to_name, verification_link, verification_link
     );
 
-    send_email(&config, to_email, "Verifikasi Email Anda - Big Auto", &html_body)
+    send_email_via_resend(
+        http_client,
+        api_key,
+        from_email,
+        to_email,
+        "Verifikasi Email Anda - Big Auto",
+        &html_body
+    ).await
 }
 
-// Kirim OTP untuk login melalui email
-pub fn send_otp_email(
+// Kirim OTP untuk login melalui email menggunakan Resend API
+pub async fn send_otp_email(
+    http_client: &reqwest::Client,
+    api_key: &str,
+    from_email: &str,
     to_email: &str,
     to_name: &str,
     otp: &str,
 ) -> Result<(), crate::error::AppError> {
-    let config = EmailConfig::from_env()?;
-
     let html_body = format!(
         r#"
         <!DOCTYPE html>
@@ -136,96 +132,76 @@ pub fn send_otp_email(
         to_name, otp
     );
 
-    send_email(&config, to_email, "Kode OTP Login Anda - Big Auto", &html_body)
+    send_email_via_resend(
+        http_client,
+        api_key,
+        from_email,
+        to_email,
+        "Kode OTP Login Anda - Big Auto",
+        &html_body
+    ).await
 }
 
-// Internal helper function untuk mengirim email via SMTP
-fn send_email(
-    config: &EmailConfig,
+// Internal helper function untuk mengirim email via Resend API
+async fn send_email_via_resend(
+    http_client: &reqwest::Client,
+    api_key: &str,
+    from_email: &str,
     to_email: &str,
     subject: &str,
     html_body: &str,
 ) -> Result<(), crate::error::AppError> {
-    let from_address = format!("{} <{}>", config.email_from_name, config.email_from);
+    let request_body = json!({
+        "from": from_email,
+        "to": [to_email],
+        "subject": subject,
+        "html": html_body
+    });
 
-    // Create plain text version (strip HTML tags untuk fallback)
-    let plain_text = html_body
-        .replace("<br>", "\n")
-        .replace("</p>", "\n\n")
-        .replace("<strong>", "")
-        .replace("</strong>", "")
-        .replace("<h1>", "")
-        .replace("</h1>", "\n")
-        .chars()
-        .filter(|c| *c != '<' && *c != '>')
-        .collect::<String>();
+    tracing::debug!("Attempting to send email to {} via Resend API", to_email);
 
-    // Build multipart email dengan HTML + plain text alternative (best practice)
-    let email = Message::builder()
-        .from(from_address.parse().map_err(|e| crate::error::AppError::email(format!("Invalid from address: {}", e)))?)
-        .to(to_email.parse().map_err(|e| crate::error::AppError::email(format!("Invalid to address: {}", e)))?)
-        .subject(subject)
-        .multipart(
-            MultiPart::alternative()
-                .singlepart(SinglePart::plain(plain_text))
-                .singlepart(SinglePart::html(html_body.to_string()))
-        )
-        .map_err(|e| crate::error::AppError::email(format!("Failed to build email: {}", e)))?;
+    let response = http_client
+        .post("https://api.resend.com/emails")
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Content-Type", "application/json")
+        .json(&request_body)
+        .send()
+        .await
+        .map_err(|e| crate::error::AppError::email(format!("Failed to send request to Resend: {}", e)))?;
 
-    let credentials = Credentials::new(
-        config.smtp_username.clone(),
-        config.smtp_password.clone(),
-    );
-
-    // Build SMTP transport with explicit STARTTLS and timeout
-    let mailer = SmtpTransport::starttls_relay(&config.smtp_host)
-        .map_err(|e| crate::error::AppError::email(format!("Failed to create SMTP transport: {}", e)))?
-        .credentials(credentials)
-        .port(config.smtp_port)
-        .timeout(Some(std::time::Duration::from_secs(30)))
-        .build();
-
-    tracing::debug!("Attempting to send HTML email to {} via {}", to_email, config.smtp_host);
-
-    mailer
-        .send(&email)
-        .map_err(|e| crate::error::AppError::email(format!("Failed to send email: {}", e)))?;
-
-    tracing::info!("✅ Email sent successfully to {}", to_email);
-
-    Ok(())
+    if response.status().is_success() {
+        tracing::info!("✅ Email sent successfully to {}", to_email);
+        Ok(())
+    } else {
+        let error_text = response.text().await
+            .map_err(|e| crate::error::AppError::email(format!("Failed to read error response: {}", e)))?;
+        tracing::error!("❌ Failed to send email: {}", error_text);
+        Err(crate::error::AppError::email(format!("Failed to send email: {}", error_text)))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_email_config_from_env() {
-        env::set_var("SMTP_HOST", "smtp.gmail.com");
-        env::set_var("SMTP_PORT", "587");
-        env::set_var("SMTP_USERNAME", "test@gmail.com");
-        env::set_var("SMTP_PASSWORD", "password123");
-        env::set_var("EMAIL_FROM", "test@gmail.com");
-        env::set_var("EMAIL_FROM_NAME", "Test App");
+    #[tokio::test]
+    async fn test_email_config_from_env() {
+        env::set_var("RESEND_API_KEY", "re_test_key");
+        env::set_var("RESEND_FROM_EMAIL", "test@resend.dev");
 
         let config = EmailConfig::from_env().expect("Failed to load config");
 
-        assert_eq!(config.smtp_host, "smtp.gmail.com");
-        assert_eq!(config.smtp_port, 587);
-        assert_eq!(config.smtp_username, "test@gmail.com");
+        assert_eq!(config.resend_api_key, "re_test_key");
+        assert_eq!(config.email_from, "test@resend.dev");
     }
 
     #[test]
-    fn test_email_config_default_port() {
-        env::set_var("SMTP_HOST", "smtp.gmail.com");
-        env::remove_var("SMTP_PORT");
-        env::set_var("SMTP_USERNAME", "test@gmail.com");
-        env::set_var("SMTP_PASSWORD", "password123");
-        env::set_var("EMAIL_FROM", "test@gmail.com");
+    fn test_email_config_default_email() {
+        env::set_var("RESEND_API_KEY", "re_test_key");
+        env::remove_var("RESEND_FROM_EMAIL");
 
         let config = EmailConfig::from_env().expect("Failed to load config");
 
-        assert_eq!(config.smtp_port, 587, "Default port harus 587");
+        assert_eq!(config.email_from, "onboarding@resend.dev", "Default email harus onboarding@resend.dev");
     }
 }

@@ -29,6 +29,7 @@ pub struct User {
     pub updated_at: DateTime<Utc>,
 }
 
+
 // Data untuk create user baru
 #[derive(Debug, Deserialize)]
 pub struct NewUser {
@@ -199,11 +200,10 @@ impl User {
             "#
         )
         .bind(user_id)
-        .fetch_one(pool)
+        .fetch_optional(pool)
         .await?;
 
-        let blocked_until = result.try_get::<Option<DateTime<Utc>>, _>("otp_blocked_until")?;
-        Ok(blocked_until)
+        Ok(result.map(|row| row.get("otp_blocked_until")))
     }
 
     // Update profile user

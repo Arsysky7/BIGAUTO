@@ -28,8 +28,6 @@ jsonwebtoken = { workspace = true }
 uuid = { workspace = true }
 sha1 = { workspace = true }
 
-# Email
-lettre = { workspace = true }
 
 # Environment Variables
 dotenvy = { workspace = true }

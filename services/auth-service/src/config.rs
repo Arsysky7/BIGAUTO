@@ -2,6 +2,7 @@ use redis::aio::ConnectionManager;
 use sqlx::{postgres::PgPoolOptions, PgPool};
 use std::env;
 use std::time::Duration;
+use crate::utils::email::EmailConfig;
 
 // Konfigurasi utama aplikasi yang di-load dari environment variables
 #[derive(Debug, Clone)]
@@ -13,6 +14,7 @@ pub struct AppConfig {
     pub jwt_refresh_expiry: i64,
     pub server_port: u16,
     pub environment: String,
+    pub email_config: EmailConfig,
 }
 
 impl AppConfig {
@@ -50,6 +52,9 @@ impl AppConfig {
 
         let environment = env::var("RUST_ENV").unwrap_or_else(|_| "development".to_string());
 
+        let email_config = EmailConfig::from_env()
+            .map_err(|e| format!("Email config error: {}", e))?;
+
         Ok(AppConfig {
             database_url,
             redis_url,
@@ -58,6 +63,7 @@ impl AppConfig {
             jwt_refresh_expiry,
             server_port,
             environment,
+            email_config,
         })
     }
 
@@ -119,6 +125,7 @@ pub struct AppState {
     pub db: PgPool,
     pub redis: ConnectionManager,
     pub config: AppConfig,
+    pub http_client: reqwest::Client,
 }
 
 impl AppState {
@@ -132,7 +139,12 @@ impl AppState {
             .await
             .map_err(|e| format!("Gagal menginisialisasi Redis: {}", e))?;
 
-        Ok(AppState { db, redis, config })
+        let http_client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .map_err(|e| format!("Gagal menginisialisasi HTTP client: {}", e))?;
+
+        Ok(AppState { db, redis, config, http_client })
     }
 
     // Health check untuk semua dependencies

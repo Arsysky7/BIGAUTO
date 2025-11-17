@@ -19,6 +19,7 @@ pub struct LoginOtp {
     pub created_at: DateTime<Utc>,
 }
 
+
 // Data untuk create OTP baru
 #[derive(Debug)]
 pub struct NewLoginOtp {

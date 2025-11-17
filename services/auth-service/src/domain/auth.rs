@@ -159,12 +159,18 @@ pub async fn register_user(
     };
 
     // Kirim email verifikasi (async, non-blocking)
+    let http_client = state.http_client.clone();
+    let api_key = state.config.email_config.resend_api_key.clone();
+    let from_email = state.config.email_config.email_from.clone();
     tokio::spawn(async move {
         if let Err(e) = email::send_verification_email(
+            &http_client,
+            &api_key,
+            &from_email,
             &user.email,
             &user.name,
             &verification_token,
-        ) {
+        ).await {
             tracing::error!("Gagal mengirim email verifikasi: {}", e);
         }
     });
@@ -258,8 +264,18 @@ pub async fn resend_verification(
     }
 
     // Kirim Email
+    let http_client = state.http_client.clone();
+    let api_key = state.config.email_config.resend_api_key.clone();
+    let from_email = state.config.email_config.email_from.clone();
     tokio::spawn(async move {
-        if let Err(e) = email::send_verification_email(&user.email, &user.name, &verification_token) {
+        if let Err(e) = email::send_verification_email(
+            &http_client,
+            &api_key,
+            &from_email,
+            &user.email,
+            &user.name,
+            &verification_token
+        ).await {
             tracing::error!("Gagal mengirim email: {}", e);
         }
     });
@@ -359,10 +375,20 @@ pub async fn login_step1_send_otp(
     User::increment_otp_request(&state.db, user.id).await?;
 
     // Kirim OTP via email (async)
+    let http_client = state.http_client.clone();
+    let api_key = state.config.email_config.resend_api_key.clone();
+    let from_email = state.config.email_config.email_from.clone();
     let user_email = user.email.clone();
     let user_name = user.name.clone();
     tokio::spawn(async move {
-        if let Err(e) = email::send_otp_email(&user_email, &user_name, &otp_code) {
+        if let Err(e) = email::send_otp_email(
+            &http_client,
+            &api_key,
+            &from_email,
+            &user_email,
+            &user_name,
+            &otp_code
+        ).await {
             tracing::error!("Gagal mengirim OTP email: {}", e);
         }
     });
@@ -550,10 +576,20 @@ pub async fn resend_otp(
     LoginOtp::create(&state.db, otp_data).await?;
 
     // Kirim email
+    let http_client = state.http_client.clone();
+    let api_key = state.config.email_config.resend_api_key.clone();
+    let from_email = state.config.email_config.email_from.clone();
     let user_email = user.email.clone();
     let user_name = user.name.clone();
     tokio::spawn(async move {
-        if let Err(e) = email::send_otp_email(&user_email, &user_name, &otp_code) {
+        if let Err(e) = email::send_otp_email(
+            &http_client,
+            &api_key,
+            &from_email,
+            &user_email,
+            &user_name,
+            &otp_code
+        ).await {
             tracing::error!("Gagal mengirim OTP: {}", e);
         }
     });
