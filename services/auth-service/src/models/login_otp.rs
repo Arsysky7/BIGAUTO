@@ -89,12 +89,7 @@ impl LoginOtp {
     // Increment attempt count
     pub async fn increment_attempt(pool: &PgPool, otp_id: i32) -> Result<i32, sqlx::Error> {
         let result = sqlx::query(
-            r#"
-            UPDATE login_otps
-            SET attempt_count = attempt_count + 1
-            WHERE id = $1
-            RETURNING attempt_count
-            "#
+            "UPDATE login_otps SET attempt_count = attempt_count + 1 WHERE id = $1 RETURNING attempt_count"
         )
         .bind(otp_id)
         .fetch_one(pool)
@@ -110,11 +105,7 @@ impl LoginOtp {
         block_duration_minutes: i64,
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
-            r#"
-            UPDATE login_otps
-            SET blocked_until = NOW() + ($2 * INTERVAL '1 minute')
-            WHERE id = $1
-            "#
+            "UPDATE login_otps SET blocked_until = NOW() + ($2 * INTERVAL '1 minute') WHERE id = $1"
         )
         .bind(otp_id)
         .bind(block_duration_minutes)
@@ -126,12 +117,7 @@ impl LoginOtp {
     // Mark OTP sebagai sudah dipakai
     pub async fn mark_as_used(pool: &PgPool, otp_id: i32) -> Result<(), sqlx::Error> {
         sqlx::query(
-            r#"
-            UPDATE login_otps
-            SET is_used = true,
-                used_at = NOW()
-            WHERE id = $1
-            "#
+            "UPDATE login_otps SET is_used = true, used_at = NOW() WHERE id = $1"
         )
         .bind(otp_id)
         .execute(pool)
@@ -154,11 +140,7 @@ impl LoginOtp {
     // Invalidate semua OTP lama untuk user
     pub async fn invalidate_old_otps(pool: &PgPool, user_id: i32) -> Result<(), sqlx::Error> {
         sqlx::query(
-            r#"
-            UPDATE login_otps
-            SET is_used = true
-            WHERE user_id = $1 AND is_used = false
-            "#
+            "UPDATE login_otps SET is_used = true WHERE user_id = $1 AND is_used = false"
         )
         .bind(user_id)
         .execute(pool)

@@ -55,16 +55,7 @@ impl User {
     // Cari user berdasarkan email
     pub async fn find_by_email(pool: &PgPool, email: &str) -> Result<Option<Self>, sqlx::Error> {
         let result = sqlx::query(
-            r#"
-            SELECT id, email, password_hash, name, phone, is_seller,
-                   address, city, profile_photo, business_name,
-                   email_verified, email_verified_at, last_login_at,
-                   login_count, is_active, deactivated_at,
-                   otp_request_count, otp_blocked_until, last_otp_request_at,
-                   created_at, updated_at
-            FROM users
-            WHERE email = $1 AND is_active = true
-            "#
+            "SELECT id, email, password_hash, name, phone, is_seller, address, city, profile_photo, business_name, email_verified, email_verified_at, last_login_at, login_count, is_active, deactivated_at, otp_request_count, otp_blocked_until, last_otp_request_at, created_at, updated_at FROM users WHERE email = $1 AND is_active = true"
         )
         .bind(email)
         .fetch_optional(pool)
@@ -82,16 +73,7 @@ impl User {
     // Cari user berdasarkan id
     pub async fn find_by_id(pool: &PgPool, user_id: i32) -> Result<Option<Self>, sqlx::Error> {
         let result = sqlx::query(
-            r#"
-            SELECT id, email, password_hash, name, phone, is_seller,
-                   address, city, profile_photo, business_name,
-                   email_verified, email_verified_at, last_login_at,
-                   login_count, is_active, deactivated_at,
-                   otp_request_count, otp_blocked_until, last_otp_request_at,
-                   created_at, updated_at
-            FROM users
-            WHERE id = $1 AND is_active = true
-            "#
+            "SELECT id, email, password_hash, name, phone, is_seller, address, city, profile_photo, business_name, email_verified, email_verified_at, last_login_at, login_count, is_active, deactivated_at, otp_request_count, otp_blocked_until, last_otp_request_at, created_at, updated_at FROM users WHERE id = $1 AND is_active = true"
         )
         .bind(user_id)
         .fetch_optional(pool)
@@ -109,16 +91,7 @@ impl User {
     // Create user baru
     pub async fn create(pool: &PgPool, new_user: NewUser) -> Result<Self, sqlx::Error> {
         let result = sqlx::query(
-            r#"
-            INSERT INTO users (email, password_hash, name, phone, address, city)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            RETURNING id, email, password_hash, name, phone, is_seller,
-                      address, city, profile_photo, business_name,
-                      email_verified, email_verified_at, last_login_at,
-                      login_count, is_active, deactivated_at,
-                      otp_request_count, otp_blocked_until, last_otp_request_at,
-                      created_at, updated_at
-            "#
+            "INSERT INTO users (email, password_hash, name, phone, address, city) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, email, password_hash, name, phone, is_seller, address, city, profile_photo, business_name, email_verified, email_verified_at, last_login_at, login_count, is_active, deactivated_at, otp_request_count, otp_blocked_until, last_otp_request_at, created_at, updated_at"
         )
         .bind(new_user.email)
         .bind(new_user.password_hash)
