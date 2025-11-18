@@ -77,20 +77,14 @@ impl AppConfig {
 pub async fn init_db_pool(database_url: &str) -> Result<PgPool, sqlx::Error> {
     tracing::info!("Menghubungkan ke database PostgreSQL...");
 
-    // Tambahkan statement_cache_mode=disable jika belum ada untuk Railway stability
-    let connection_url = if database_url.contains("statement_cache_mode=") {
-        database_url.to_string()
-    } else {
-        format!("{}?statement_cache_mode=disable", database_url)
-    };
-
     let pool = PgPoolOptions::new()
-        .max_connections(3)
-        .min_connections(0)
-        .acquire_timeout(Duration::from_secs(30))
-        .idle_timeout(Duration::from_secs(600))
-        .max_lifetime(Duration::from_secs(1800))
-        .connect(&connection_url)
+        .max_connections(2)
+        .min_connections(1)
+        .acquire_timeout(Duration::from_secs(15))
+        .idle_timeout(Duration::from_secs(300))
+        .max_lifetime(Duration::from_secs(900))
+        .test_before_acquire(true)
+        .connect(database_url)
         .await?;
 
     tracing::info!("Koneksi database berhasil dibuat");

@@ -23,45 +23,93 @@ impl CleanupScheduler {
 
                 tracing::info!("🧹 Running background cleanup tasks...");
 
-                // Cleanup expired email verifications
-                match EmailVerification::cleanup_expired(&self.state.db).await {
-                    Ok(deleted) => {
-                        if deleted > 0 {
-                            tracing::info!("✅ Cleaned up {} expired email verifications", deleted);
+                // Cleanup expired email verifications (with retry logic)
+                let db = self.state.db.clone();
+                tokio::spawn(async move {
+                    for attempt in 1..=3 {
+                        match EmailVerification::cleanup_expired(&db).await {
+                            Ok(deleted) => {
+                                if deleted > 0 {
+                                    tracing::info!("✅ Cleaned up {} expired email verifications", deleted);
+                                }
+                                break;
+                            }
+                            Err(e) => {
+                                if attempt == 3 {
+                                    tracing::error!("❌ Failed to cleanup email verifications after 3 attempts: {}", e);
+                                } else {
+                                    tokio::time::sleep(Duration::from_millis(1000)).await;
+                                }
+                            }
                         }
                     }
-                    Err(e) => tracing::error!("❌ Failed to cleanup email verifications: {}", e),
-                }
+                });
 
-                // Cleanup expired OTPs
-                match LoginOtp::cleanup_expired(&self.state.db).await {
-                    Ok(deleted) => {
-                        if deleted > 0 {
-                            tracing::info!("✅ Cleaned up {} expired OTPs", deleted);
+                // Cleanup expired OTPs (with retry logic)
+                let db = self.state.db.clone();
+                tokio::spawn(async move {
+                    for attempt in 1..=3 {
+                        match LoginOtp::cleanup_expired(&db).await {
+                            Ok(deleted) => {
+                                if deleted > 0 {
+                                    tracing::info!("✅ Cleaned up {} expired OTPs", deleted);
+                                }
+                                break;
+                            }
+                            Err(e) => {
+                                if attempt == 3 {
+                                    tracing::error!("❌ Failed to cleanup OTPs after 3 attempts: {}", e);
+                                } else {
+                                    tokio::time::sleep(Duration::from_millis(1000)).await;
+                                }
+                            }
                         }
                     }
-                    Err(e) => tracing::error!("❌ Failed to cleanup OTPs: {}", e),
-                }
+                });
 
-                // Cleanup expired sessions
-                match UserSession::cleanup_expired(&self.state.db).await {
-                    Ok(deleted) => {
-                        if deleted > 0 {
-                            tracing::info!("✅ Cleaned up {} expired sessions", deleted);
+                // Cleanup expired sessions (with retry logic)
+                let db = self.state.db.clone();
+                tokio::spawn(async move {
+                    for attempt in 1..=3 {
+                        match UserSession::cleanup_expired(&db).await {
+                            Ok(deleted) => {
+                                if deleted > 0 {
+                                    tracing::info!("✅ Cleaned up {} expired sessions", deleted);
+                                }
+                                break;
+                            }
+                            Err(e) => {
+                                if attempt == 3 {
+                                    tracing::error!("❌ Failed to cleanup expired sessions after 3 attempts: {}", e);
+                                } else {
+                                    tokio::time::sleep(Duration::from_millis(1000)).await;
+                                }
+                            }
                         }
                     }
-                    Err(e) => tracing::error!("❌ Failed to cleanup expired sessions: {}", e),
-                }
+                });
 
-                // Cleanup inactive sessions (30+ days)
-                match UserSession::cleanup_inactive(&self.state.db).await {
-                    Ok(deleted) => {
-                        if deleted > 0 {
-                            tracing::info!("✅ Cleaned up {} inactive sessions", deleted);
+                // Cleanup inactive sessions (with retry logic)
+                let db = self.state.db.clone();
+                tokio::spawn(async move {
+                    for attempt in 1..=3 {
+                        match UserSession::cleanup_inactive(&db).await {
+                            Ok(deleted) => {
+                                if deleted > 0 {
+                                    tracing::info!("✅ Cleaned up {} inactive sessions", deleted);
+                                }
+                                break;
+                            }
+                            Err(e) => {
+                                if attempt == 3 {
+                                    tracing::error!("❌ Failed to cleanup inactive sessions after 3 attempts: {}", e);
+                                } else {
+                                    tokio::time::sleep(Duration::from_millis(1000)).await;
+                                }
+                            }
                         }
                     }
-                    Err(e) => tracing::error!("❌ Failed to cleanup inactive sessions: {}", e),
-                }
+                });
 
                 tracing::info!("✅ Background cleanup tasks completed");
             }

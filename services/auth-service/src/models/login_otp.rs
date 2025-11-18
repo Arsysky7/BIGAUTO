@@ -151,10 +151,7 @@ impl LoginOtp {
     // Cleanup expired OTPs (dipanggil via cron job)
     pub async fn cleanup_expired(pool: &PgPool) -> Result<u64, sqlx::Error> {
         let result = sqlx::query(
-            r#"
-            DELETE FROM login_otps
-            WHERE expires_at < NOW() - INTERVAL '24 hours'
-            "#
+            "DELETE FROM login_otps WHERE expires_at < NOW() - INTERVAL '24 hours'"
         )
         .execute(pool)
         .await?;

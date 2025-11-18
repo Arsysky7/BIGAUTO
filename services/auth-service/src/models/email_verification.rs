@@ -123,10 +123,7 @@ impl EmailVerification {
     // Cleanup expired tokens (dipanggil via cron job)
     pub async fn cleanup_expired(pool: &PgPool) -> Result<u64, sqlx::Error> {
         let result = sqlx::query(
-            r#"
-            DELETE FROM email_verifications
-            WHERE expires_at < NOW() AND is_used = false
-            "#
+            "DELETE FROM email_verifications WHERE expires_at < NOW() AND is_used = false"
         )
         .execute(pool)
         .await?;

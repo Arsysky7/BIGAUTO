@@ -212,10 +212,7 @@ impl UserSession {
     // Cleanup expired sessions (dipanggil via cron job)
     pub async fn cleanup_expired(pool: &PgPool) -> Result<u64, sqlx::Error> {
         let result = sqlx::query(
-            r#"
-            DELETE FROM user_sessions
-            WHERE expires_at < NOW() - INTERVAL '7 days'
-            "#
+            "DELETE FROM user_sessions WHERE expires_at < NOW() - INTERVAL '7 days'"
         )
         .execute(pool)
         .await?;
@@ -226,10 +223,7 @@ impl UserSession {
     // Cleanup inactive sessions (lebih dari 30 hari tidak aktif)
     pub async fn cleanup_inactive(pool: &PgPool) -> Result<u64, sqlx::Error> {
         let result = sqlx::query(
-            r#"
-            DELETE FROM user_sessions
-            WHERE last_activity < NOW() - INTERVAL '30 days'
-            "#
+            "DELETE FROM user_sessions WHERE last_activity < NOW() - INTERVAL '30 days'"
         )
         .execute(pool)
         .await?;
