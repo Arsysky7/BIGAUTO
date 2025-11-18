@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
 use sqlx::types::JsonValue;
 use utoipa::ToSchema;
 
@@ -280,4 +281,39 @@ pub struct Model {
     pub id: i32,
     pub brand_id: i32,
     pub name: String,
+}
+
+impl Vehicle {
+    /// Cleanup expired vehicle listings (older than 180 days and inactive)
+    pub async fn cleanup_expired_listings(pool: &PgPool) -> Result<u64, sqlx::Error> {
+        let result = sqlx::query(
+            "DELETE FROM vehicles WHERE status = 'inactive' AND updated_at < NOW() - INTERVAL '180 days'"
+        )
+        .execute(pool)
+        .await?;
+
+        Ok(result.rows_affected())
+    }
+
+    /// Update status for expired listings (older than 90 days)
+    pub async fn update_expired_status(pool: &PgPool) -> Result<u64, sqlx::Error> {
+        let result = sqlx::query(
+            "UPDATE vehicles SET status = 'inactive', updated_at = NOW() WHERE status = 'available' AND updated_at < NOW() - INTERVAL '90 days'"
+        )
+        .execute(pool)
+        .await?;
+
+        Ok(result.rows_affected())
+    }
+
+    /// Cleanup inactive vehicles (not updated in 90 days)
+    pub async fn cleanup_inactive_vehicles(pool: &PgPool) -> Result<u64, sqlx::Error> {
+        let result = sqlx::query(
+            "DELETE FROM vehicles WHERE updated_at < NOW() - INTERVAL '90 days' AND status NOT IN ('available', 'rented')"
+        )
+        .execute(pool)
+        .await?;
+
+        Ok(result.rows_affected())
+    }
 }

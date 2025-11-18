@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
+use sqlx::{PgPool, FromRow};
 use utoipa::ToSchema;
 
 // Model user dari database
@@ -108,5 +108,29 @@ pub struct UploadPhotoResponse {
     /// Thumbnail URL (150px width)
     #[schema(example = "https://res.cloudinary.com/drjf5hd0p/image/upload/c_thumb,w_150/v1234/profiles/user-1.jpg")]
     pub thumbnail: String,
+}
+
+impl User {
+    /// Cleanup expired email verification tokens (older than 24 hours)
+    pub async fn cleanup_expired_verifications(pool: &PgPool) -> Result<u64, sqlx::Error> {
+        let result = sqlx::query(
+            "DELETE FROM email_verifications WHERE expires_at < NOW() - INTERVAL '24 hours'"
+        )
+        .execute(pool)
+        .await?;
+
+        Ok(result.rows_affected())
+    }
+
+    /// Deactivate inactive users (not logged in for 365 days)
+    pub async fn deactivate_inactive_users(pool: &PgPool) -> Result<u64, sqlx::Error> {
+        let result = sqlx::query(
+            "UPDATE users SET is_active = false, deactivated_at = NOW(), updated_at = NOW() WHERE is_active = true AND (last_login_at IS NULL OR last_login_at < NOW() - INTERVAL '365 days')"
+        )
+        .execute(pool)
+        .await?;
+
+        Ok(result.rows_affected())
+    }
 }
 

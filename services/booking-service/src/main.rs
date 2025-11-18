@@ -17,6 +17,7 @@ mod error;
 mod handlers;
 mod repositories;
 mod routes;
+mod scheduler;
 
 use config::{AppConfig, AppState};
 use error::{AppError, AppResult};
@@ -61,6 +62,11 @@ async fn main() -> AppResult<()> {
 
     // Database connection sudah diuji saat create pool
     tracing::info!("✅ Database connection berhasil");
+
+    // Start background cleanup scheduler
+    tracing::info!("🔄 Starting background cleanup scheduler...");
+    scheduler::BookingScheduler::new(app_state.clone()).start();
+    tracing::info!("✅ Background cleanup scheduler started");
 
     // Build router dengan middleware
     let app = create_app(app_state.clone());

@@ -9,6 +9,7 @@ mod handlers;
 mod middleware;
 mod repositories;
 mod routes;
+mod scheduler;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -35,6 +36,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         tracing::warn!("⚠️ Health check: Database {}", health.database);
     }
+
+    // Start background cleanup scheduler
+    tracing::info!("🔄 Starting background cleanup scheduler...");
+    scheduler::VehicleScheduler::new(state.clone()).start();
+    tracing::info!("✅ Background cleanup scheduler started");
 
     let app = routes::create_router(state.clone())
         .layer(

@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
 use utoipa::ToSchema;
 
 
@@ -100,5 +101,21 @@ pub struct RatingDistribution {
     pub three_star: i64,
     pub two_star: i64,
     pub one_star: i64,
+}
+
+// Review implementation for cleanup operations
+pub struct Review;
+
+impl Review {
+    /// Cleanup spam/inappropriate reviews (flagged for more than 7 days)
+    pub async fn cleanup_spam_reviews(pool: &PgPool) -> Result<u64, sqlx::Error> {
+        let result = sqlx::query(
+            "DELETE FROM reviews WHERE is_inappropriate = true AND updated_at < NOW() - INTERVAL '7 days'"
+        )
+        .execute(pool)
+        .await?;
+
+        Ok(result.rows_affected())
+    }
 }
 

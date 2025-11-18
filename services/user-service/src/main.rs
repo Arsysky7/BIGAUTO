@@ -8,6 +8,7 @@ mod error;
 mod handlers;
 mod middleware;
 mod routes;
+mod scheduler;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -45,6 +46,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         tracing::warn!("⚠️ Health check: Database {}", health.database);
     }
+
+    // Start background cleanup scheduler
+    tracing::info!("🔄 Starting background cleanup scheduler...");
+    scheduler::UserScheduler::new(state.clone()).start();
+    tracing::info!("✅ Background cleanup scheduler started");
 
     // Create router dengan CORS
     let app = routes::create_router(state.clone())

@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
+use sqlx::{PgPool, Row, FromRow};
 
 // Represent user session dari database
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -34,26 +34,18 @@ pub struct NewUserSession {
 impl UserSession {
     // Create session baru
     pub async fn create(pool: &PgPool, data: NewUserSession) -> Result<Self, sqlx::Error> {
-        sqlx::query_as::<_, UserSession>(
-            r#"
-            INSERT INTO user_sessions
-                (user_id, refresh_token, access_token_jti, user_agent, ip_address, device_name, expires_at)
-            VALUES ($1, $2, $3, $4, $5::inet, $6, $7)
-            RETURNING id, user_id, refresh_token, access_token_jti,
-                      user_agent, ip_address::text, device_name,
-                      expires_at, last_activity, is_active,
-                      created_at, updated_at
-            "#
-        )
-        .bind(data.user_id)
-        .bind(data.refresh_token)
-        .bind(data.access_token_jti)
-        .bind(data.user_agent)
-        .bind(data.ip_address)
-        .bind(data.device_name)
-        .bind(data.expires_at)
-        .fetch_one(pool)
-        .await
+        let result = sqlx::query("INSERT INTO user_sessions (user_id, refresh_token, access_token_jti, user_agent, ip_address, device_name, expires_at) VALUES ($1, $2, $3, $4, $5::inet, $6, $7) RETURNING id, user_id, refresh_token, access_token_jti, user_agent, ip_address::text, device_name, expires_at, last_activity, is_active, created_at, updated_at")
+            .bind(data.user_id)
+            .bind(data.refresh_token)
+            .bind(data.access_token_jti)
+            .bind(data.user_agent)
+            .bind(data.ip_address)
+            .bind(data.device_name)
+            .bind(data.expires_at)
+            .fetch_one(pool)
+            .await?;
+
+        Ok(UserSession::from_row(&result)?)
     }
 
     // Cari session by refresh token

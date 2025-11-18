@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
 use utoipa::ToSchema;
 
 // Model utama RentalBooking dari database
@@ -165,5 +166,51 @@ impl From<RentalBooking> for RentalBookingResponse {
             created_at: booking.created_at,
             updated_at: booking.updated_at,
         }
+    }
+}
+
+impl RentalBooking {
+    /// Cancel expired pending payment bookings (older than 1 hour)
+    pub async fn cleanup_expired_pending_payments(pool: &PgPool) -> Result<u64, sqlx::Error> {
+        let result = sqlx::query(
+            "UPDATE rental_bookings SET status = 'cancelled', cancel_reason = 'Payment timeout', cancelled_at = NOW(), updated_at = NOW() WHERE status = 'pending_payment' AND created_at < NOW() - INTERVAL '1 hour'"
+        )
+        .execute(pool)
+        .await?;
+
+        Ok(result.rows_affected())
+    }
+
+    /// Auto-complete overdue rentals (where return date has passed more than 24 hours)
+    pub async fn auto_complete_overdue_rentals(pool: &PgPool) -> Result<u64, sqlx::Error> {
+        let result = sqlx::query(
+            "UPDATE rental_bookings SET status = 'selesai', updated_at = NOW() WHERE status = 'berjalan' AND return_date < NOW() - INTERVAL '24 hours'"
+        )
+        .execute(pool)
+        .await?;
+
+        Ok(result.rows_affected())
+    }
+
+    /// Update booking status from "akan datang" to "berjalan" when pickup date arrives
+    pub async fn update_pickup_ready_bookings(pool: &PgPool) -> Result<u64, sqlx::Error> {
+        let result = sqlx::query(
+            "UPDATE rental_bookings SET status = 'berjalan', updated_at = NOW() WHERE status = 'akan datang' AND pickup_date <= NOW()"
+        )
+        .execute(pool)
+        .await?;
+
+        Ok(result.rows_affected())
+    }
+
+    /// Cleanup very old completed/cancelled bookings (older than 180 days)
+    pub async fn cleanup_old_bookings(pool: &PgPool) -> Result<u64, sqlx::Error> {
+        let result = sqlx::query(
+            "DELETE FROM rental_bookings WHERE status IN ('selesai', 'cancelled') AND updated_at < NOW() - INTERVAL '180 days'"
+        )
+        .execute(pool)
+        .await?;
+
+        Ok(result.rows_affected())
     }
 }

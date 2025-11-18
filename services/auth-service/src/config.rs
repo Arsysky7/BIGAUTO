@@ -77,6 +77,15 @@ impl AppConfig {
 pub async fn init_db_pool(database_url: &str) -> Result<PgPool, sqlx::Error> {
     tracing::info!("Menghubungkan ke database PostgreSQL...");
 
+    // Add statement_cache_mode=disable to prevent prepared statement conflicts
+    let modified_url = if database_url.contains('?') {
+        format!("{}&statement_cache_mode=disable", database_url)
+    } else {
+        format!("{}?statement_cache_mode=disable", database_url)
+    };
+
+    tracing::info!("Database URL dengan statement cache disabled: {}", &modified_url.split('@').nth(1).unwrap_or("****"));
+
     let pool = PgPoolOptions::new()
         .max_connections(2)
         .min_connections(1)
@@ -84,7 +93,7 @@ pub async fn init_db_pool(database_url: &str) -> Result<PgPool, sqlx::Error> {
         .idle_timeout(Duration::from_secs(300))
         .max_lifetime(Duration::from_secs(900))
         .test_before_acquire(true)
-        .connect(database_url)
+        .connect(&modified_url)
         .await?;
 
     tracing::info!("Koneksi database berhasil dibuat");

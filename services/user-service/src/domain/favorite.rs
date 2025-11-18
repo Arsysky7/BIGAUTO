@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
+use sqlx::{PgPool, FromRow};
 use utoipa::ToSchema;
 
 // Model favorite dari database
@@ -51,4 +51,18 @@ pub struct FavoriteWithVehicle {
 }))]
 pub struct CheckFavoriteResponse {
     pub is_favorite: bool,
+}
+
+// Favorite implementation for cleanup operations
+impl Favorite {
+    /// Cleanup orphaned favorites (vehicles that no longer exist)
+    pub async fn cleanup_orphaned_favorites(pool: &PgPool) -> Result<u64, sqlx::Error> {
+        let result = sqlx::query(
+            "DELETE FROM favorites WHERE vehicle_id NOT IN (SELECT id FROM vehicles)"
+        )
+        .execute(pool)
+        .await?;
+
+        Ok(result.rows_affected())
+    }
 }
