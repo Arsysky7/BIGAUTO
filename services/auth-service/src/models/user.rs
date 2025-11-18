@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::{PgPool, Row};
+use sqlx::{PgPool, Row, FromRow};
 
 // Represent user row dari database
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -54,7 +54,7 @@ pub struct UpdateUserProfile {
 impl User {
     // Cari user berdasarkan email
     pub async fn find_by_email(pool: &PgPool, email: &str) -> Result<Option<Self>, sqlx::Error> {
-        sqlx::query_as::<_, User>(
+        let result = sqlx::query(
             r#"
             SELECT id, email, password_hash, name, phone, is_seller,
                    address, city, profile_photo, business_name,
@@ -68,12 +68,20 @@ impl User {
         )
         .bind(email)
         .fetch_optional(pool)
-        .await
+        .await?;
+
+        match result {
+            Some(row) => {
+                let user = User::from_row(&row)?;
+                Ok(Some(user))
+            }
+            None => Ok(None)
+        }
     }
 
     // Cari user berdasarkan id
     pub async fn find_by_id(pool: &PgPool, user_id: i32) -> Result<Option<Self>, sqlx::Error> {
-        sqlx::query_as::<_, User>(
+        let result = sqlx::query(
             r#"
             SELECT id, email, password_hash, name, phone, is_seller,
                    address, city, profile_photo, business_name,
@@ -87,12 +95,20 @@ impl User {
         )
         .bind(user_id)
         .fetch_optional(pool)
-        .await
+        .await?;
+
+        match result {
+            Some(row) => {
+                let user = User::from_row(&row)?;
+                Ok(Some(user))
+            }
+            None => Ok(None)
+        }
     }
 
     // Create user baru
     pub async fn create(pool: &PgPool, new_user: NewUser) -> Result<Self, sqlx::Error> {
-        sqlx::query_as::<_, User>(
+        let result = sqlx::query(
             r#"
             INSERT INTO users (email, password_hash, name, phone, address, city)
             VALUES ($1, $2, $3, $4, $5, $6)
@@ -111,7 +127,9 @@ impl User {
         .bind(new_user.address)
         .bind(new_user.city)
         .fetch_one(pool)
-        .await
+        .await?;
+
+        Ok(User::from_row(&result)?)
     }
 
     // Verifikasi email user

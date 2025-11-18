@@ -4,7 +4,7 @@ use axum::{
 };
 use serde::Serialize;
 use shared::utils::{cloudinary::CloudinaryClient, validation};
-use sqlx::{PgPool, Row, FromRow};
+use sqlx::{PgPool, FromRow};
 use utoipa::ToSchema;
 
 use crate::{

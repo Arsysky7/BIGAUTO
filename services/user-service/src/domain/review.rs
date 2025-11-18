@@ -1,29 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::Value as JsonValue;
-use sqlx::FromRow;
 use utoipa::ToSchema;
 
-// Model review dari database (polymorphic: rental & sale)
-#[derive(Debug, Clone, FromRow, Serialize, Deserialize, ToSchema)]
-pub struct Review {
-    pub id: i32,
-    pub rental_booking_id: Option<i32>,
-    pub sale_order_id: Option<i32>,
-    pub review_for_type: String, 
-    pub vehicle_id: i32,
-    pub seller_id: i32,
-    pub customer_id: i32,
-    pub overall_rating: i32,
-    pub vehicle_condition_rating: Option<i32>,
-    pub accuracy_rating: Option<i32>, 
-    pub service_rating: Option<i32>,
-    pub comment: Option<String>,
-    pub photos: Option<JsonValue>,
-    pub is_visible: bool,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
 
 // Request create review
 #[derive(Debug, Clone, Deserialize, ToSchema)]

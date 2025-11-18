@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::{PgPool, Row};
+use sqlx::{PgPool, Row, FromRow};
 
 // Represent OTP login dari database
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -34,7 +34,7 @@ pub struct NewLoginOtp {
 impl LoginOtp {
     // Create OTP baru
     pub async fn create(pool: &PgPool, data: NewLoginOtp) -> Result<Self, sqlx::Error> {
-        sqlx::query_as::<_, LoginOtp>(
+        let result = sqlx::query(
             r#"
             INSERT INTO login_otps (user_id, otp_code, otp_hash, expires_at, ip_address, user_agent)
             VALUES ($1, $2, $3, $4, $5::inet, $6)
@@ -50,7 +50,9 @@ impl LoginOtp {
         .bind(data.ip_address)
         .bind(data.user_agent)
         .fetch_one(pool)
-        .await
+        .await?;
+
+        Ok(LoginOtp::from_row(&result)?)
     }
 
     // Cari OTP terakhir untuk user (yang belum expired & belum dipakai)
@@ -58,7 +60,7 @@ impl LoginOtp {
         pool: &PgPool,
         user_id: i32,
     ) -> Result<Option<Self>, sqlx::Error> {
-        sqlx::query_as::<_, LoginOtp>(
+        let result = sqlx::query(
             r#"
             SELECT id, user_id, otp_code, otp_hash, expires_at, is_used,
                    used_at, attempt_count, blocked_until,
@@ -73,7 +75,15 @@ impl LoginOtp {
         )
         .bind(user_id)
         .fetch_optional(pool)
-        .await
+        .await?;
+
+        match result {
+            Some(row) => {
+                let otp = LoginOtp::from_row(&row)?;
+                Ok(Some(otp))
+            }
+            None => Ok(None)
+        }
     }
 
     // Increment attempt count
