@@ -4,7 +4,7 @@ use axum::{
 };
 use serde::Serialize;
 use shared::utils::{cloudinary::CloudinaryClient, validation};
-use sqlx::PgPool;
+use sqlx::{PgPool, Row, FromRow};
 use utoipa::ToSchema;
 
 use crate::{
@@ -205,13 +205,20 @@ pub async fn upload_profile_photo(
 
 // Cari user berdasarkan ID
 async fn find_user_by_id(pool: &PgPool, user_id: i32) -> Result<User, AppError> {
-    sqlx::query_as::<_, User>(
+    let result = sqlx::query(
         "SELECT * FROM users WHERE id = $1 AND is_active = true"
     )
     .bind(user_id)
     .fetch_optional(pool)
-    .await?
-    .ok_or_else(|| AppError::not_found("User tidak ditemukan"))
+    .await?;
+
+    match result {
+        Some(row) => {
+            let user = User::from_row(&row)?;
+            Ok(user)
+        }
+        None => Err(AppError::not_found("User tidak ditemukan")),
+    }
 }
 
 // Update profile user
@@ -220,7 +227,7 @@ async fn update_user_profile(
     user_id: i32,
     payload: UpdateProfileRequest,
 ) -> Result<User, AppError> {
-    let user = sqlx::query_as::<_, User>(
+    let result = sqlx::query(
         r#"
         UPDATE users
         SET
@@ -235,14 +242,15 @@ async fn update_user_profile(
         "#
     )
     .bind(user_id)
-    .bind(payload.name)
-    .bind(payload.phone)
-    .bind(payload.address)
-    .bind(payload.city)
-    .bind(payload.business_name)
+    .bind(&payload.name)
+    .bind(&payload.phone)
+    .bind(&payload.address)
+    .bind(&payload.city)
+    .bind(&payload.business_name)
     .fetch_one(pool)
     .await?;
 
+    let user = User::from_row(&result)?;
     Ok(user)
 }
 
@@ -252,7 +260,7 @@ async fn set_user_as_seller(
     user_id: i32,
     business_name: &str,
 ) -> Result<User, AppError> {
-    let user = sqlx::query_as::<_, User>(
+    let result = sqlx::query(
         r#"
         UPDATE users
         SET
@@ -268,6 +276,7 @@ async fn set_user_as_seller(
     .fetch_one(pool)
     .await?;
 
+    let user = User::from_row(&result)?;
     Ok(user)
 }
 

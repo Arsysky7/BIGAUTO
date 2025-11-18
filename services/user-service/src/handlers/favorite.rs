@@ -5,7 +5,7 @@ use axum::{
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 use shared::utils::http_client::ServiceClient;
-use sqlx::PgPool;
+use sqlx::{PgPool, Row, FromRow};
 use utoipa::ToSchema;
 
 use crate::{
@@ -164,30 +164,36 @@ pub async fn check_favorite(
 
 // Count total favorites untuk user (untuk strict validation)
 async fn count_user_favorites(pool: &PgPool, customer_id: i32) -> Result<i64, AppError> {
-    let count: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM favorites WHERE customer_id = $1"
+    let result = sqlx::query(
+        "SELECT COUNT(*) as count FROM favorites WHERE customer_id = $1"
     )
     .bind(customer_id)
     .fetch_one(pool)
     .await?;
 
-    Ok(count.0)
+    Ok(result.get::<i64, _>("count"))
 }
 
 async fn fetch_user_favorites(pool: &PgPool, customer_id: i32) -> Result<Vec<Favorite>, AppError> {
-    let favorites = sqlx::query_as::<_, Favorite>(
+    let results = sqlx::query(
         "SELECT * FROM favorites WHERE customer_id = $1 ORDER BY created_at DESC"
     )
     .bind(customer_id)
     .fetch_all(pool)
     .await?;
 
+    let mut favorites = Vec::new();
+    for result in results {
+        let favorite = Favorite::from_row(&result)?;
+        favorites.push(favorite);
+    }
+
     Ok(favorites)
 }
 
 // Insert favorite baru
 async fn insert_favorite(pool: &PgPool, customer_id: i32, vehicle_id: i32) -> Result<Favorite, AppError> {
-    let favorite = sqlx::query_as::<_, Favorite>(
+    let result = sqlx::query(
         r#"
         INSERT INTO favorites (customer_id, vehicle_id)
         VALUES ($1, $2)
@@ -206,6 +212,7 @@ async fn insert_favorite(pool: &PgPool, customer_id: i32, vehicle_id: i32) -> Re
         }
     })?;
 
+    let favorite = Favorite::from_row(&result)?;
     Ok(favorite)
 }
 
@@ -228,15 +235,15 @@ async fn delete_favorite(pool: &PgPool, customer_id: i32, vehicle_id: i32) -> Re
 
 // Cek apakah vehicle sudah di-favorite
 async fn is_vehicle_favorited(pool: &PgPool, customer_id: i32, vehicle_id: i32) -> Result<bool, AppError> {
-    let count: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM favorites WHERE customer_id = $1 AND vehicle_id = $2"
+    let result = sqlx::query(
+        "SELECT COUNT(*) as count FROM favorites WHERE customer_id = $1 AND vehicle_id = $2"
     )
     .bind(customer_id)
     .bind(vehicle_id)
     .fetch_one(pool)
     .await?;
 
-    Ok(count.0 > 0)
+    Ok(result.get::<i64, _>("count") > 0)
 }
 
 // Fetch vehicle info dari vehicle-service

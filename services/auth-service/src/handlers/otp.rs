@@ -18,15 +18,11 @@ use crate::{
 /// Response untuk OTP status check
 #[derive(Debug, Serialize, ToSchema)]
 pub struct OtpStatusResponse {
-    /// Apakah user sedang diblokir dari request OTP
     #[schema(example = false)]
     pub is_blocked: bool,
-    /// Waktu berakhir block (jika diblokir)
     pub blocked_until: Option<DateTime<Utc>>,
-    /// Sisa waktu block dalam menit (jika diblokir)
     #[schema(example = 15)]
     pub remaining_minutes: Option<i64>,
-    /// Pesan informasi
     #[schema(example = "Akun Anda tidak diblokir. Anda dapat request OTP.")]
     pub message: String,
 }

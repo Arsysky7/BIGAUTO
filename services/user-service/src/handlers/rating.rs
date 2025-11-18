@@ -4,12 +4,12 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use shared::utils::validation;
-use sqlx::PgPool;
+use sqlx::{PgPool, Row, FromRow};
 use utoipa::{IntoParams, ToSchema};
 
 use crate::{
     config::AppConfig,
-    domain::review::{CreateReviewRequest, Review, ReviewWithCustomer, SellerRatingSummary, RatingDistribution},
+    domain::review::{CreateReviewRequest, ReviewWithCustomer, SellerRatingSummary, RatingDistribution},
     error::AppError,
     middleware::{AuthUser, AuthSeller},
 };
@@ -191,19 +191,20 @@ pub async fn get_my_seller_reviews(
 
 // Count reviews yang dibuat user hari ini (untuk spam prevention)
 async fn count_user_reviews_today(pool: &PgPool, customer_id: i32) -> Result<i64, AppError> {
-    let count: (i64,) = sqlx::query_as(
+    let result = sqlx::query(
         r#"
-        SELECT COUNT(*)
+        SELECT COUNT(*) as count
         FROM reviews
         WHERE customer_id = $1
-          AND DATE(created_at) = CURRENT_DATE
+          AND created_at >= CURRENT_DATE::date
+          AND created_at < CURRENT_DATE::date + INTERVAL '1 day'
         "#
     )
     .bind(customer_id)
     .fetch_one(pool)
     .await?;
 
-    Ok(count.0)
+    Ok(result.get::<i64, _>("count"))
 }
 
 // Fetch reviews seller dengan customer info
@@ -228,7 +229,7 @@ async fn fetch_seller_reviews(
         customer_photo: Option<String>,
     }
 
-    let rows = sqlx::query_as::<_, ReviewRow>(
+    let rows = sqlx::query(
         r#"
         SELECT
             r.id,
@@ -255,22 +256,23 @@ async fn fetch_seller_reviews(
     .fetch_all(pool)
     .await?;
 
-    let reviews = rows
-        .into_iter()
-        .map(|row| ReviewWithCustomer {
-            id: row.id,
-            overall_rating: row.overall_rating,
-            vehicle_condition_rating: row.vehicle_condition_rating,
-            accuracy_rating: row.accuracy_rating,
-            service_rating: row.service_rating,
-            comment: row.comment,
-            photos: row.photos.and_then(|s| serde_json::from_str(&s).ok()),
-            created_at: row.created_at,
-            customer_id: row.customer_id,
-            customer_name: row.customer_name,
-            customer_photo: row.customer_photo,
-        })
-        .collect();
+    let mut reviews = Vec::new();
+    for row in rows {
+        let review_row = ReviewRow::from_row(&row)?;
+        reviews.push(ReviewWithCustomer {
+            id: review_row.id,
+            overall_rating: review_row.overall_rating,
+            vehicle_condition_rating: review_row.vehicle_condition_rating,
+            accuracy_rating: review_row.accuracy_rating,
+            service_rating: review_row.service_rating,
+            comment: review_row.comment,
+            photos: review_row.photos.and_then(|s| serde_json::from_str(&s).ok()),
+            created_at: review_row.created_at,
+            customer_id: review_row.customer_id,
+            customer_name: review_row.customer_name,
+            customer_photo: review_row.customer_photo,
+        });
+    }
 
     Ok(reviews)
 }
@@ -281,7 +283,7 @@ async fn calculate_rating_summary(
     seller_id: i32,
 ) -> Result<SellerRatingSummary, AppError> {
     // Aggregate rating stats
-    let stats: Option<(i64, f64, Option<f64>, Option<f64>, Option<f64>)> = sqlx::query_as(
+    let result = sqlx::query(
         r#"
         SELECT
             COUNT(*)::BIGINT as total_reviews,
@@ -297,8 +299,16 @@ async fn calculate_rating_summary(
     .fetch_optional(pool)
     .await?;
 
-    let (total_reviews, average_rating, avg_vehicle, avg_accuracy, avg_service) =
-        stats.unwrap_or((0, 0.0, None, None, None));
+    let (total_reviews, average_rating, avg_vehicle, avg_accuracy, avg_service) = match result {
+        Some(row) => (
+            row.get::<i64, _>("total_reviews"),
+            row.get::<f64, _>("average_rating"),
+            row.get::<Option<f64>, _>("avg_vehicle_condition"),
+            row.get::<Option<f64>, _>("avg_accuracy"),
+            row.get::<Option<f64>, _>("avg_service")
+        ),
+        None => (0, 0.0, None, None, None),
+    };
 
     // Rating distribution (1-5 star counts)
     let distribution = calculate_rating_distribution(pool, seller_id).await?;
@@ -319,9 +329,9 @@ async fn calculate_rating_distribution(
     pool: &PgPool,
     seller_id: i32,
 ) -> Result<RatingDistribution, AppError> {
-    let counts: Vec<(i32, i64)> = sqlx::query_as(
+    let rows = sqlx::query(
         r#"
-        SELECT overall_rating, COUNT(*)::BIGINT
+        SELECT overall_rating, COUNT(*)::BIGINT as count
         FROM reviews
         WHERE seller_id = $1 AND is_visible = true
         GROUP BY overall_rating
@@ -330,6 +340,13 @@ async fn calculate_rating_distribution(
     .bind(seller_id)
     .fetch_all(pool)
     .await?;
+
+    let mut counts = Vec::new();
+    for row in rows {
+        let rating = row.get::<i32, _>("overall_rating");
+        let count = row.get::<i64, _>("count");
+        counts.push((rating, count));
+    }
 
     let mut distribution = RatingDistribution {
         five_star: 0,
@@ -363,7 +380,7 @@ async fn insert_review(
     // Serialize photos array ke JSONB
     let photos_json = req.photos.as_ref().map(|p| serde_json::to_value(p).unwrap());
 
-    let review = sqlx::query_as::<_, Review>(
+    let result = sqlx::query(
         r#"
         INSERT INTO reviews (
             customer_id,
@@ -376,7 +393,7 @@ async fn insert_review(
             comment,
             photos
         ) VALUES ($1, $2, 0, $3, $4, $5, $6, $7, $8)
-        RETURNING *
+        RETURNING id
         "#
     )
     .bind(customer_id)
@@ -390,5 +407,5 @@ async fn insert_review(
     .fetch_one(pool)
     .await?;
 
-    Ok(review.id)
+    Ok(result.get::<i32, _>("id"))
 }

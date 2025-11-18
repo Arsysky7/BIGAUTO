@@ -177,12 +177,12 @@ impl User {
         sqlx::query(
             r#"
             UPDATE users
-            SET otp_blocked_until = NOW() + ($1 || ' minutes')::interval,
+            SET otp_blocked_until = NOW() + ($1 * INTERVAL '1 minute'),
                 updated_at = NOW()
             WHERE id = $2
             "#
         )
-        .bind(block_duration_minutes.to_string())
+        .bind(block_duration_minutes)
         .bind(user_id)
         .execute(pool)
         .await?;

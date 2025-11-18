@@ -102,12 +102,12 @@ impl LoginOtp {
         sqlx::query(
             r#"
             UPDATE login_otps
-            SET blocked_until = NOW() + ($2 || ' minutes')::interval
+            SET blocked_until = NOW() + ($2 * INTERVAL '1 minute')
             WHERE id = $1
             "#
         )
         .bind(otp_id)
-        .bind(block_duration_minutes.to_string())
+        .bind(block_duration_minutes)
         .execute(pool)
         .await?;
         Ok(())

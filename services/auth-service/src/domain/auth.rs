@@ -27,16 +27,12 @@ pub struct RegisterInput {
 // Struktur data untuk response registrasi
 #[derive(Debug, serde::Serialize, utoipa::ToSchema)]
 pub struct RegisterResponse {
-    /// User ID yang baru dibuat
     #[schema(example = 1)]
     pub user_id: i32,
-    /// Email yang didaftarkan
     #[schema(example = "john@example.com")]
     pub email: String,
-    /// Nama user
     #[schema(example = "John Doe")]
     pub name: String,
-    /// Pesan konfirmasi
     #[schema(example = "Registrasi berhasil. Silakan cek email untuk verifikasi akun.")]
     pub message: String,
 }
@@ -67,22 +63,16 @@ pub struct LoginResponse {
 // Data user untuk response (tanpa sensitive info)
 #[derive(Debug, serde::Serialize, utoipa::ToSchema)]
 pub struct UserData {
-    /// User ID
     #[schema(example = 1)]
     pub id: i32,
-    /// Email address
     #[schema(example = "john@example.com")]
     pub email: String,
-    /// Nama lengkap
     #[schema(example = "John Doe")]
     pub name: String,
-    /// Nomor telepon
     #[schema(example = "+6281234567890")]
     pub phone: String,
-    /// Status sebagai seller
     #[schema(example = false)]
     pub is_seller: bool,
-    /// Status verifikasi email
     #[schema(example = true)]
     pub email_verified: bool,
 }
