@@ -50,16 +50,17 @@ Big Auto is a comprehensive vehicle marketplace platform that connects vehicle b
 gantt
     title Big Auto Development Timeline
     dateFormat  YYYY-MM-DD
-    section Core Services
-    Auth Service           :done, auth, 2024-10-01, 2024-10-15
-    User Service           :done, user, 2024-10-16, 2024-10-30
-    Vehicle Service        :done, vehicle, 2024-11-01, 2024-11-15
-    Booking Service        :done, booking, 2024-11-16, 2024-11-30
-    Payment Service        :done, payment, 2024-12-01, 2024-12-15
-    Chat Service           :done, chat, 2024-12-16, 2024-12-20
-    section Remaining
-    Notification Service   :active, notify, 2024-12-21, 2025-01-10
-    Financial Service      :financial, 2025-01-11, 2025-01-25
+    section Phase 1: Core Services
+    Auth Service           :done, auth, 2025-10-01, 2025-10-20
+    User Service           :done, user, 2025-10-21, 2025-11-10
+    Vehicle Service        :done, vehicle, 2025-11-11, 2025-11-30
+    section Phase 2: Business Services
+    Booking Service        :done, booking, 2025-12-01, 2025-12-20
+    Payment Service        :done, payment, 2025-12-21, 2025-12-30
+    Chat Service           :done, chat, 2025-12-25, 2025-12-31
+    section Phase 3: Supporting Services
+    Notification Service   :active, notify, 2026-01-01, 2026-01-15
+    Financial Service      :financial, 2026-01-16, 2026-01-31
 ```
 
 </div>
@@ -724,13 +725,14 @@ cargo build --release
 
 ### Swagger UI Endpoints
 
-Layanan	        Port	Tautan Swagger UI (URL)	                                Tautan ReDoc (URL)
-Auth Service	3001	Swagger UI (http://localhost:3001/swagger-ui)	ReDoc (http://localhost:3001/redoc)
-User Service	3002	Swagger UI (http://localhost:3002/swagger-ui)	ReDoc (http://localhost:3002/redoc)
-Vehicle Service	3003	Swagger UI (http://localhost:3003/swagger-ui)	ReDoc (http://localhost:3003/redoc)
-Booking Service	3004	Swagger UI (http://localhost:3004/swagger-ui)	ReDoc (http://localhost:3004/redoc)
-Payment Service	3005	Swagger UI (http://localhost:3005/swagger-ui)	ReDoc (http://localhost:3005/redoc)
-Chat Service	3006	Swagger UI (http://localhost:3006/swagger-ui)	ReDoc (http://localhost:3006/redoc)
+| Service             | Port  | Swagger UI                                    | ReDoc                                      |
+|---------------------|-------|-----------------------------------------------|--------------------------------------------|
+| **Auth Service**    | 3001  | [Swagger UI](http://localhost:3001/swagger-ui) | [ReDoc](http://localhost:3001/redoc)       |
+| **User Service**    | 3002  | [Swagger UI](http://localhost:3002/swagger-ui) | [ReDoc](http://localhost:3002/redoc)       |
+| **Vehicle Service** | 3003  | [Swagger UI](http://localhost:3003/swagger-ui) | [ReDoc](http://localhost:3003/redoc)       |
+| **Booking Service** | 3004  | [Swagger UI](http://localhost:3004/swagger-ui) | [ReDoc](http://localhost:3004/redoc)       |
+| **Payment Service** | 3005  | [Swagger UI](http://localhost:3005/swagger-ui) | [ReDoc](http://localhost:3005/redoc)       |
+| **Chat Service**    | 3006  | [Swagger UI](http://localhost:3006/swagger-ui) | [ReDoc](http://localhost:3006/redoc)       |
 
 ### API Rate Limits
 
@@ -743,44 +745,6 @@ Chat Service	3006	Swagger UI (http://localhost:3006/swagger-ui)	ReDoc (http://lo
 | **Payment Processing** | 20/min | 25/min  |      Yes      |
 | **File Uploads**       | 10/min | 12/min  |      Yes      |
 | **Chat Messages**      | 300/min| 350/min |      Yes      |
-
----
-
-
-```
-
-### Docker Production Deployment
-
-```bash
-# Build Production Images
-docker build -t bigauto/auth-service:latest ./services/auth-service
-docker build -t bigauto/user-service:latest ./services/user-service
-docker build -t bigauto/vehicle-service:latest ./services/vehicle-service
-
-# Tag and Push to Registry
-docker tag bigauto/auth-service:latest your-registry/bigauto/auth-service:latest
-docker push your-registry/bigauto/auth-service:latest
-
-# Deploy with Docker Compose
-docker-compose -f docker-compose.prod.yml up -d
-```
-
-**Production Docker Compose Configuration:**
-```yaml
-version: '3.8'
-services:
-  auth-service:
-    image: bigauto/auth-service:latest
-    ports:
-      - "3001:3001"
-    environment:
-      - DATABASE_URL=${DATABASE_URL}
-      - JWT_SECRET=${JWT_SECRET}
-      - REDIS_URL=${REDIS_URL}
-    restart: unless-stopped
-
-  # ... similar configuration for other services
-```
 
 ---
 
@@ -937,7 +901,7 @@ hey -n 100 -c 5 -m POST -H "Content-Type: application/json" \
 <div align="center">
 
 **License:** [MIT License](LICENSE)
-**Copyright:** © 2024 Big Auto Platform. All rights reserved.
+**Copyright:** © 2025 Big Auto Platform. All rights reserved.
 **Last Updated:** December 2024
 
 ---
