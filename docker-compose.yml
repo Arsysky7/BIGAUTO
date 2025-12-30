@@ -1,0 +1,227 @@
+version: '3.8'
+
+services:
+  # Redis (for rate limiting & caching)
+  redis:
+    image: redis:7.2-alpine
+    container_name: redis_server
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - car-rental-network
+    command: redis-server --appendonly yes
+
+  # NATS Message Broker
+  nats:
+    image: nats:2.10-alpine
+    container_name: nats_server
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    command: ["--js"]
+    networks:
+      - car-rental-network
+
+  # Auth Service
+  auth-service:
+    build:
+      context: .
+      dockerfile: services/auth-service/Dockerfile
+    container_name: auth_service
+    env_file: ./.env
+    ports:
+      - "3001:3001"
+    networks:
+      - car-rental-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      - redis
+      - nats
+
+  # User Service
+  user-service:
+    build:
+      context: .
+      dockerfile: services/user-service/Dockerfile
+    container_name: user_service
+    env_file: ./.env
+    ports:
+      - "3002:3002"
+    networks:
+      - car-rental-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Vehicle Service
+  vehicle-service:
+    build:
+      context: .
+      dockerfile: services/vehicle-service/Dockerfile
+    container_name: vehicle_service
+    env_file: ./.env
+    ports:
+      - "3003:3003"
+    networks:
+      - car-rental-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Booking Service
+  booking-service:
+    build:
+      context: .
+      dockerfile: services/booking-service/Dockerfile
+    container_name: booking_service
+    env_file: ./.env
+    ports:
+      - "3004:3004"
+    networks:
+      - car-rental-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      - vehicle-service
+      - user-service
+
+  # Payment Service
+  payment-service:
+    build:
+      context: .
+      dockerfile: services/payment-service/Dockerfile
+    container_name: payment_service
+    env_file: ./.env
+    ports:
+      - "3005:3005"
+    networks:
+      - car-rental-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      - booking-service
+
+  # Chat Service
+  chat-service:
+    build:
+      context: .
+      dockerfile: services/chat-service/Dockerfile
+    container_name: chat_service
+    env_file: ./.env
+    ports:
+      - "3006:3006"
+    networks:
+      - car-rental-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3006/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      - nats
+      - user-service
+
+  # Notification Service
+  notification-service:
+    build:
+      context: .
+      dockerfile: services/notification-service/Dockerfile
+    container_name: notification_service
+    env_file: ./.env
+    ports:
+      - "3007:3007"
+    networks:
+      - car-rental-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3007/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      - user-service
+      - booking-service
+
+  # Financial Service
+  financial-service:
+    build:
+      context: .
+      dockerfile: services/financial-service/Dockerfile
+    container_name: financial_service
+    env_file: ./.env
+    ports:
+      - "3008:3008"
+    networks:
+      - car-rental-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3008/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      - booking-service
+      - user-service
+
+  # Nginx with Auto SSL
+  nginx-certbot:
+    image: jonasal/nginx-certbot:5.2.0
+    container_name: nginx_gateway
+    environment:
+      - CERTBOT_EMAIL=arilsyah25@gmail.com
+      - STAGING=0  
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/user_conf.d:/etc/nginx/user_conf.d
+      - nginx_secrets:/etc/letsencrypt
+    networks:
+      - car-rental-network
+    depends_on:
+      - auth-service
+      - user-service
+      - vehicle-service
+      - booking-service
+      - payment-service
+      - chat-service
+      - notification-service
+      - financial-service
+
+networks:
+  car-rental-network:
+    driver: bridge
+
+volumes:
+  redis_data:
+  nginx_secrets:

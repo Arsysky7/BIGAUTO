@@ -12,10 +12,10 @@ RUN apt-get update && apt-get install -y \
 # Copy workspace files
 COPY Cargo.toml Cargo.lock ./
 COPY shared ./shared
-COPY services/user-service ./services/user-service
+COPY services/chat-service ./services/chat-service
 
 # Build service
-RUN cargo build --release -p user-service
+RUN cargo build --release -p chat-service
 
 # Runtime stage
 FROM debian:bookworm-slim
@@ -30,11 +30,11 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy binary dari builder
-COPY --from=builder /app/target/release/user-service /usr/local/bin/user-service
+COPY --from=builder /app/target/release/chat-service /usr/local/bin/chat-service
 
-EXPOSE 3002
+EXPOSE 3006
 
 ENV RUST_LOG=info
 ENV RUST_ENV=production
 
-CMD ["user-service"]
+CMD ["chat-service"]
