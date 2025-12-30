@@ -42,6 +42,9 @@ thiserror = { workspace = true }
 # Validation
 validator = { workspace = true }
 
+# Redis for Rate Limiting 
+redis = { workspace = true }
+
 # OpenAPI Documentation
 utoipa = { workspace = true }
 utoipa-swagger-ui = { workspace = true }

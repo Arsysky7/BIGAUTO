@@ -45,7 +45,8 @@ pub async fn check_otp_status_handler(
     headers: HeaderMap,
 ) -> AppResult<impl IntoResponse> {
     // Extract user dari JWT token
-    let auth_user = extract_authenticated_user(&headers, &state.config.jwt_secret)
+    let auth_user = extract_authenticated_user(&headers, &state.config.jwt_secret, &state.db)
+        .await
         .map_err(|(_status, msg)| crate::error::AppError::authentication(&msg))?;
 
     // Check OTP block status

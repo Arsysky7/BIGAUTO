@@ -58,6 +58,7 @@ pub fn sanitize_html(input: &str) -> String {
         .replace('\'', "&#x27;")
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -112,4 +113,4 @@ mod tests {
         assert!(!is_valid_rating(0));
         assert!(!is_valid_rating(6));
     }
-}
+  }

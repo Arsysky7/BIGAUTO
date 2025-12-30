@@ -13,14 +13,12 @@ use crate::{
         AcceptCounterOfferRequest, CounterOfferRequest, CancelRequest,
         RejectSaleOrderRequest, StartDocumentTransferRequest, SaleStatus
     },
+    middleware::auth::{AuthUser, AuthSeller, AuthCustomer},
     repositories::sale_repo,
     error::AppError,
     AppState,
 };
 
-use shared::{
-    utils::auth_middleware::{AuthCustomer, AuthSeller, AuthUser},
-};
 
 // Create sale order baru (customer)
 #[utoipa::path(
@@ -42,7 +40,7 @@ use shared::{
 )]
 pub async fn create_sale_order(
     State(state): State<AppState>,
-    AuthCustomer { claims }: AuthCustomer,
+    auth: AuthCustomer,
     Json(request): Json<CreateSaleOrderRequest>,
 ) -> Result<(StatusCode, Json<SaleOrderResponse>), AppError> {
     // Validasi vehicle dan dapatkan seller_id + asking_price dari vehicle-service API
@@ -81,7 +79,7 @@ pub async fn create_sale_order(
     // Buat sale order baru dengan data real dari vehicle-service
     let sale_order = sale_repo::create_sale_order(
         &state.db,
-        claims.sub,
+        auth.user_id,
         vehicle_info.seller_id,
         vehicle_info.asking_price,
         &request,
@@ -116,14 +114,14 @@ pub async fn create_sale_order(
 pub async fn get_sale_order(
     State(state): State<AppState>,
     Path(order_id): Path<i64>,
-    AuthUser { claims }: AuthUser,
+    auth: AuthUser,
 ) -> Result<Json<SaleOrderResponse>, AppError> {
     let sale_order = sale_repo::find_sale_order_by_id(&state.db, order_id as i32)
         .await?
         .ok_or(AppError::NotFound("Pesanan tidak ditemukan".to_string()))?;
 
     // Validasi akses: hanya customer atau seller terkait yang bisa melihat
-    if claims.sub != sale_order.buyer_id && claims.sub != sale_order.seller_id {
+    if auth.user_id != sale_order.buyer_id && auth.user_id != sale_order.seller_id {
         return Err(AppError::Forbidden("Akses ditolak".to_string()));
     }
 
@@ -148,12 +146,12 @@ pub async fn get_sale_order(
 )]
 pub async fn get_customer_sale_orders(
     State(state): State<AppState>,
-    AuthCustomer { claims }: AuthCustomer,
+    auth: AuthCustomer,
     Query(params): Query<SaleOrderQueryParams>,
 ) -> Result<Json<Vec<SaleOrderResponse>>, AppError> {
     let orders = sale_repo::find_sale_orders_by_buyer(
         &state.db,
-        claims.sub,
+        auth.user_id,
         params.status,
         params.page,
         params.limit,
@@ -184,12 +182,12 @@ pub async fn get_customer_sale_orders(
 )]
 pub async fn get_seller_sale_orders(
     State(state): State<AppState>,
-    AuthSeller { claims }: AuthSeller,
+    auth: AuthSeller,
     Query(params): Query<SaleOrderQueryParams>,
 ) -> Result<Json<Vec<SaleOrderResponse>>, AppError> {
     let orders = sale_repo::find_sale_orders_by_seller(
         &state.db,
-        claims.sub,
+        auth.user_id,
         params.status,
         params.page,
         params.limit,
@@ -227,9 +225,24 @@ pub async fn get_seller_sale_orders(
 pub async fn confirm_sale_order(
     State(state): State<AppState>,
     Path(order_id): Path<i64>,
-    AuthCustomer { claims: _ }: AuthCustomer,
+    auth: AuthCustomer,
     Json(payload): Json<AcceptSaleOrderRequest>,
 ) -> Result<Json<SaleOrderResponse>, AppError> {
+    // Cek order ada dan customer memiliki akses
+    let sale_order = sale_repo::find_sale_order_by_id(&state.db, order_id as i32)
+        .await?
+        .ok_or(AppError::NotFound("Pesanan tidak ditemukan".to_string()))?;
+
+    // Validasi akses: hanya buyer yang bisa konfirmasi
+    if auth.user_id != sale_order.buyer_id {
+        return Err(AppError::Forbidden("Akses ditolak - hanya pembeli yang bisa konfirmasi order".to_string()));
+    }
+
+    // Validasi status order
+    if sale_order.status != "pending_confirmation" {
+        return Err(AppError::BadRequest("Order tidak bisa dikonfirmasi - status tidak valid".to_string()));
+    }
+
     // Validasi payload
     if payload.accept {
         // Customer menerima harga
@@ -272,7 +285,7 @@ pub async fn confirm_sale_order(
 pub async fn seller_counter_offer(
     State(state): State<AppState>,
     Path(order_id): Path<i64>,
-    AuthSeller { claims }: AuthSeller,
+    auth: AuthSeller,
     Json(payload): Json<CounterOfferRequest>,
 ) -> Result<Json<SaleOrderResponse>, AppError> {
     // Cek order ada dan seller memiliki akses
@@ -280,7 +293,7 @@ pub async fn seller_counter_offer(
         .await?
         .ok_or(AppError::NotFound("Pesanan tidak ditemukan".to_string()))?;
 
-    if claims.sub != sale_order.seller_id {
+    if auth.user_id != sale_order.seller_id {
         return Err(AppError::Forbidden("Akses ditolak".to_string()));
     }
 
@@ -331,7 +344,7 @@ pub async fn seller_counter_offer(
 pub async fn reject_sale_order(
     State(state): State<AppState>,
     Path(order_id): Path<i64>,
-    AuthSeller { claims }: AuthSeller,
+    auth: AuthSeller,
     Json(payload): Json<RejectSaleOrderRequest>,
 ) -> Result<Json<SaleOrderResponse>, AppError> {
     // Cek order ada dan seller memiliki akses
@@ -339,7 +352,7 @@ pub async fn reject_sale_order(
         .await?
         .ok_or(AppError::NotFound("Pesanan tidak ditemukan".to_string()))?;
 
-    if claims.sub != sale_order.seller_id {
+    if auth.user_id != sale_order.seller_id {
         return Err(AppError::Forbidden("Akses ditolak".to_string()));
     }
 
@@ -389,7 +402,7 @@ pub async fn reject_sale_order(
 pub async fn accept_counter_offer(
     State(state): State<AppState>,
     Path(order_id): Path<i64>,
-    AuthCustomer { claims }: AuthCustomer,
+    auth: AuthCustomer,
     Json(payload): Json<AcceptCounterOfferRequest>,
 ) -> Result<Json<SaleOrderResponse>, AppError> {
     // Validasi bahwa customer menerima counter offer
@@ -402,7 +415,7 @@ pub async fn accept_counter_offer(
         .await?
         .ok_or(AppError::NotFound("Pesanan tidak ditemukan".to_string()))?;
 
-    if claims.sub != sale_order.buyer_id {
+    if auth.user_id != sale_order.buyer_id {
         return Err(AppError::Forbidden("Akses ditolak".to_string()));
     }
 
@@ -439,7 +452,7 @@ pub async fn accept_counter_offer(
 pub async fn cancel_sale_order(
     State(state): State<AppState>,
     Path(order_id): Path<i64>,
-    AuthUser { claims }: AuthUser,
+    auth: AuthUser,
     Json(payload): Json<CancelRequest>,
 ) -> Result<Json<SaleOrderResponse>, AppError> {
     // Cek order ada dan user memiliki akses
@@ -448,7 +461,7 @@ pub async fn cancel_sale_order(
         .ok_or(AppError::NotFound("Pesanan tidak ditemukan".to_string()))?;
 
     // Validasi akses: hanya buyer atau seller yang bisa cancel
-    if claims.sub != sale_order.buyer_id && claims.sub != sale_order.seller_id {
+    if auth.user_id != sale_order.buyer_id && auth.user_id != sale_order.seller_id {
         return Err(AppError::Forbidden("Akses ditolak".to_string()));
     }
 
@@ -494,7 +507,7 @@ pub async fn cancel_sale_order(
 pub async fn upload_buyer_ktp(
     State(state): State<AppState>,
     Path(order_id): Path<i64>,
-    AuthCustomer { claims }: AuthCustomer,
+    auth: AuthCustomer,
     Json(payload): Json<UploadKtpRequest>,
 ) -> Result<Json<SaleOrderResponse>, AppError> {
     // Cek order ada dan customer memiliki akses
@@ -502,7 +515,7 @@ pub async fn upload_buyer_ktp(
         .await?
         .ok_or(AppError::NotFound("Pesanan tidak ditemukan".to_string()))?;
 
-    if claims.sub != sale_order.buyer_id {
+    if auth.user_id != sale_order.buyer_id {
         return Err(AppError::Forbidden("Akses ditolak".to_string()));
     }
 
@@ -546,7 +559,7 @@ pub async fn upload_buyer_ktp(
 pub async fn start_document_transfer(
     State(state): State<AppState>,
     Path(order_id): Path<i64>,
-    AuthSeller { claims }: AuthSeller,
+    auth: AuthSeller,
     Json(payload): Json<StartDocumentTransferRequest>,
 ) -> Result<Json<SaleOrderResponse>, AppError> {
     // Cek order ada dan seller memiliki akses
@@ -554,7 +567,7 @@ pub async fn start_document_transfer(
         .await?
         .ok_or(AppError::NotFound("Pesanan tidak ditemukan".to_string()))?;
 
-    if claims.sub != sale_order.seller_id {
+    if auth.user_id != sale_order.seller_id {
         return Err(AppError::Forbidden("Akses ditolak".to_string()));
     }
 
@@ -602,7 +615,7 @@ pub async fn start_document_transfer(
 pub async fn update_document_status(
     State(state): State<AppState>,
     Path(order_id): Path<i64>,
-    AuthSeller { claims }: AuthSeller,
+    auth: AuthSeller,
     Json(payload): Json<UpdateDocumentStatusRequest>,
 ) -> Result<Json<SaleOrderResponse>, AppError> {
     // Cek order ada dan seller memiliki akses
@@ -610,7 +623,7 @@ pub async fn update_document_status(
         .await?
         .ok_or(AppError::NotFound("Pesanan tidak ditemukan".to_string()))?;
 
-    if claims.sub != sale_order.seller_id {
+    if auth.user_id != sale_order.seller_id {
         return Err(AppError::Forbidden("Akses ditolak".to_string()));
     }
 
@@ -656,7 +669,7 @@ pub async fn update_document_status(
 pub async fn mark_sale_order_as_paid(
     State(state): State<AppState>,
     Path(order_id): Path<i64>,
-    AuthUser { claims: _ }: AuthUser, // Internal use only
+    _auth: AuthUser,  
 ) -> Result<Json<SaleOrderResponse>, AppError> {
     // Bisa diakses oleh customer/seller yang memiliki valid token
     // Validasi tambahan bisa ditambahkan untuk payment service signature
@@ -704,14 +717,14 @@ pub async fn mark_sale_order_as_paid(
 pub async fn confirm_documents_received(
     State(state): State<AppState>,
     Path(order_id): Path<i64>,
-    AuthCustomer { claims }: AuthCustomer,
+    auth: AuthCustomer,
 ) -> Result<Json<SaleOrderResponse>, AppError> {
     // Cek order ada dan customer memiliki akses
     let sale_order = sale_repo::find_sale_order_by_id(&state.db, order_id as i32)
         .await?
         .ok_or(AppError::NotFound("Pesanan tidak ditemukan".to_string()))?;
 
-    if claims.sub != sale_order.buyer_id {
+    if auth.user_id != sale_order.buyer_id {
         return Err(AppError::Forbidden("Akses ditolak".to_string()));
     }
 

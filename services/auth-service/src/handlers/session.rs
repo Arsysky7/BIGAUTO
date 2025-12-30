@@ -68,7 +68,8 @@ pub async fn get_sessions_handler(
     headers: HeaderMap,
 ) -> AppResult<impl IntoResponse> {
     // Extract user dari JWT token
-    let auth_user = extract_authenticated_user(&headers, &state.config.jwt_secret)
+    let auth_user = extract_authenticated_user(&headers, &state.config.jwt_secret, &state.db)
+        .await
         .map_err(|(_status, msg)| crate::error::AppError::authentication(&msg))?;
 
     // Call domain layer untuk get all active sessions
@@ -84,7 +85,7 @@ pub async fn get_sessions_handler(
             ip_address: s.ip_address,
             last_activity: s.last_activity,
             expires_at: s.expires_at,
-            is_current: false, // TODO: bisa dibandingkan dengan current session token dari JWT
+            is_current: false, 
         })
         .collect();
 
@@ -112,7 +113,8 @@ pub async fn invalidate_session_handler(
     Path(session_id): Path<i32>,
 ) -> AppResult<impl IntoResponse> {
     // Extract user dari JWT token
-    let auth_user = extract_authenticated_user(&headers, &state.config.jwt_secret)
+    let auth_user = extract_authenticated_user(&headers, &state.config.jwt_secret, &state.db)
+        .await
         .map_err(|(_status, msg)| crate::error::AppError::authentication(&msg))?;
 
     // Call domain layer untuk invalidate session (includes authorization check)
@@ -142,7 +144,8 @@ pub async fn invalidate_all_sessions_handler(
     headers: HeaderMap,
 ) -> AppResult<impl IntoResponse> {
     // Extract user dari JWT token
-    let auth_user = extract_authenticated_user(&headers, &state.config.jwt_secret)
+    let auth_user = extract_authenticated_user(&headers, &state.config.jwt_secret, &state.db)
+        .await
         .map_err(|(_status, msg)| crate::error::AppError::authentication(&msg))?;
 
     // Call domain layer untuk invalidate all sessions

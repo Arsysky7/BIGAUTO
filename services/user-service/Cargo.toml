@@ -22,6 +22,9 @@ serde_json = { workspace = true }
 # Database
 sqlx = { workspace = true }
 
+# Redis for Rate Limiting 
+redis = { workspace = true }
+
 # Authentication & Security
 jsonwebtoken = { workspace = true }
 

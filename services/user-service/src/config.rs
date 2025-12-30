@@ -1,6 +1,10 @@
-use sqlx::{postgres::PgPoolOptions, PgPool};
+use sqlx::{
+    postgres::PgPoolOptions,
+    PgPool
+};
 use std::env;
 use std::time::Duration;
+use crate::middleware::rate_limit::RateLimiter;
 
 // Konfigurasi utama aplikasi yang di-load dari environment variables
 #[derive(Debug, Clone)]
@@ -54,27 +58,23 @@ impl AppConfig {
     }
 }
 
-// Inisialisasi connection pool database dengan konfigurasi optimal
+// Inisialisasi database connection pool 
 pub async fn init_db_pool(database_url: &str) -> Result<PgPool, sqlx::Error> {
-    tracing::info!("Menghubungkan ke database PostgreSQL...");
+    tracing::info!("🔌 Initializing User Service database connection...");
 
-    // Tambahkan statement_cache_mode=disable jika belum ada untuk Railway stability
-    let connection_url = if database_url.contains("statement_cache_mode=") {
-        database_url.to_string()
-    } else {
-        format!("{}?statement_cache_mode=disable", database_url)
-    };
+    // Parse connection options dan disable prepared statements 
 
     let pool = PgPoolOptions::new()
-        .max_connections(3)
-        .min_connections(0)
-        .acquire_timeout(Duration::from_secs(30))
+        .max_connections(5)
+        .min_connections(2)
+        .acquire_timeout(Duration::from_secs(20))
         .idle_timeout(Duration::from_secs(600))
         .max_lifetime(Duration::from_secs(1800))
-        .connect(&connection_url)
+        .test_before_acquire(true)
+        .connect(database_url)
         .await?;
 
-    tracing::info!("Koneksi database berhasil dibuat");
+    tracing::info!("✅ User Service database pool initialized successfully");
 
     Ok(pool)
 }
@@ -92,6 +92,7 @@ pub async fn check_db_health(pool: &PgPool) -> bool {
 pub struct AppState {
     pub db: PgPool,
     pub config: AppConfig,
+    pub rate_limiter: RateLimiter,
 }
 
 // Implement FromRef untuk bisa extract PgPool dari AppState
@@ -108,6 +109,13 @@ impl axum::extract::FromRef<AppState> for AppConfig {
     }
 }
 
+// Implement FromRef untuk bisa extract RateLimiter dari AppState
+impl axum::extract::FromRef<AppState> for RateLimiter {
+    fn from_ref(state: &AppState) -> Self {
+        state.rate_limiter.clone()
+    }
+}
+
 impl AppState {
     // Buat AppState baru dengan semua dependensi
     pub async fn new() -> Result<Self, String> {
@@ -116,7 +124,26 @@ impl AppState {
             .await
             .map_err(|e| format!("Gagal menginisialisasi database: {}", e))?;
 
-        Ok(AppState { db, config })
+        // Initialize Redis rate limiter
+        let redis_url = env::var("REDIS_URL")
+            .unwrap_or_else(|_| {
+                tracing::error!("❌ REDIS_URL environment variable tidak diset");
+                panic!("REDIS_URL environment variable is REQUIRED for rate limiting");
+            });
+
+        tracing::info!("🔄 Initializing Redis rate limiter...");
+        let rate_limiter = RateLimiter::new(&redis_url)
+            .unwrap_or_else(|e| {
+                tracing::error!("❌ Failed to initialize Redis rate limiter: {}", e);
+                panic!("Failed to initialize Redis rate limiter: {}. Redis is MANDATORY", e);
+            });
+        tracing::info!("✅ Redis rate limiter initialized successfully (MANDATORY)");
+
+        Ok(AppState {
+            db,
+            config,
+            rate_limiter,
+        })
     }
 
     // Health check untuk dependencies

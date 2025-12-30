@@ -2,7 +2,6 @@ use axum::Router;
 use dotenvy::dotenv;
 use std::net::SocketAddr;
 use tokio::signal;
-use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -100,17 +99,9 @@ async fn main() -> AppResult<()> {
     Ok(())
 }
 
-/// Create the main application with all middleware and routes
+/// Create application 
 fn create_app(state: AppState) -> Router {
-    // Configure CORS
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
-
-    // Create router with all routes
     routes::create_router(state)
-        .layer(cors)
         .layer(TraceLayer::new_for_http())
 }
 

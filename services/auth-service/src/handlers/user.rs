@@ -17,11 +17,11 @@ use crate::{
 // ===== AUTH EXTRACTOR =====
 
 // Struct untuk menyimpan data user yang sudah terautentikasi dari JWT middleware
-// Akan di-implement sebagai FromRequestParts di middleware/auth.rs
 #[derive(Debug, Clone)]
 pub struct AuthenticatedUser {
     pub user_id: i32,
     pub email: String,
+    pub is_customer: bool,
     pub is_seller: bool,
 }
 
@@ -74,7 +74,8 @@ pub async fn get_profile_handler(
     headers: HeaderMap,
 ) -> AppResult<impl IntoResponse> {
     // Extract user dari JWT token
-    let auth_user = extract_authenticated_user(&headers, &state.config.jwt_secret)
+    let auth_user = extract_authenticated_user(&headers, &state.config.jwt_secret, &state.db)
+        .await
         .map_err(|(_status, msg)| crate::error::AppError::authentication(&msg))?;
 
     // Call domain layer untuk get profile
@@ -102,7 +103,8 @@ pub async fn update_profile_handler(
     Json(req): Json<UpdateProfileRequestBody>,
 ) -> AppResult<impl IntoResponse> {
     // Extract user dari JWT token
-    let auth_user = extract_authenticated_user(&headers, &state.config.jwt_secret)
+    let auth_user = extract_authenticated_user(&headers, &state.config.jwt_secret, &state.db)
+        .await
         .map_err(|(_status, msg)| crate::error::AppError::authentication(&msg))?;
 
     // Convert request body ke domain input
@@ -139,7 +141,8 @@ pub async fn upgrade_to_seller_handler(
     Json(req): Json<UpgradeToSellerRequestBody>,
 ) -> AppResult<impl IntoResponse> {
     // Extract user dari JWT token
-    let auth_user = extract_authenticated_user(&headers, &state.config.jwt_secret)
+    let auth_user = extract_authenticated_user(&headers, &state.config.jwt_secret, &state.db)
+        .await
         .map_err(|(_status, msg)| crate::error::AppError::authentication(&msg))?;
 
     // Convert request body ke domain input

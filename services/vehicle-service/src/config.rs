@@ -1,6 +1,7 @@
 use sqlx::{postgres::PgPoolOptions, PgPool};
 use std::env;
 use std::time::Duration;
+use crate::middleware::rate_limit::RateLimiter;
 
 // Konfigurasi utama aplikasi yang di-load dari environment variables
 #[derive(Debug, Clone)]
@@ -86,6 +87,7 @@ pub async fn check_db_health(pool: &PgPool) -> bool {
 pub struct AppState {
     pub db: PgPool,
     pub config: AppConfig,
+    pub rate_limiter: RateLimiter,
 }
 
 // Implement FromRef untuk bisa extract PgPool dari AppState
@@ -102,6 +104,13 @@ impl axum::extract::FromRef<AppState> for AppConfig {
     }
 }
 
+// Implement FromRef untuk bisa extract RateLimiter dari AppState
+impl axum::extract::FromRef<AppState> for RateLimiter {
+    fn from_ref(state: &AppState) -> Self {
+        state.rate_limiter.clone()
+    }
+}
+
 impl AppState {
     // Buat AppState baru dengan semua dependensi
     pub async fn new() -> Result<Self, String> {
@@ -110,7 +119,22 @@ impl AppState {
             .await
             .map_err(|e| format!("Gagal menginisialisasi database: {}", e))?;
 
-        Ok(AppState { db, config })
+        // Initialize Redis rate limiter 
+        let redis_url = env::var("REDIS_URL")
+            .unwrap_or_else(|_| {
+                tracing::error!("❌ REDIS_URL environment variable tidak diset");
+                panic!("REDIS_URL environment variable is REQUIRED for rate limiting");
+            });
+
+        tracing::info!("🔄 Initializing Redis rate limiter...");
+        let rate_limiter = RateLimiter::new(&redis_url)
+            .unwrap_or_else(|e| {
+                tracing::error!("❌ Failed to initialize Redis rate limiter: {}", e);
+                panic!("Failed to initialize Redis rate limiter: {}. Redis is MANDATORY", e);
+            });
+        tracing::info!("✅ Redis rate limiter initialized successfully (MANDATORY)");
+
+        Ok(AppState { db, config, rate_limiter })
     }
 
     // Health check untuk dependencies

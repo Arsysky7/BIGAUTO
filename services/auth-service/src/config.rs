@@ -1,8 +1,14 @@
 use redis::aio::ConnectionManager;
-use sqlx::{postgres::PgPoolOptions, PgPool};
+use sqlx::{
+    postgres::{PgPoolOptions, PgConnectOptions},
+    PgPool,
+};
 use std::env;
+use std::sync::Arc;
 use std::time::Duration;
+use std::str::FromStr;
 use crate::utils::email::EmailConfig;
+use crate::middleware::rate_limit::AuthRateLimiter;
 
 // Konfigurasi utama aplikasi yang di-load dari environment variables
 #[derive(Debug, Clone)]
@@ -73,31 +79,26 @@ impl AppConfig {
     }
 }
 
-// Inisialisasi connection pool database dengan konfigurasi optimal
+// Inisialisasi database connection pool yang optimal
 pub async fn init_db_pool(database_url: &str) -> Result<PgPool, sqlx::Error> {
-    tracing::info!("Menghubungkan ke database PostgreSQL...");
+    tracing::info!("🔌 Initializing Auth Service database connection for Supabase PgBouncer...");
 
-    // Add statement_cache_mode=disable to prevent prepared statement conflicts
-    let modified_url = if database_url.contains('?') {
-        format!("{}&statement_cache_mode=disable", database_url)
-    } else {
-        format!("{}?statement_cache_mode=disable", database_url)
-    };
+    // Parse connection options dan disable prepared statements (
+    let options = PgConnectOptions::from_str(database_url)?
+        .statement_cache_capacity(0); 
 
-    tracing::info!("Database URL dengan statement cache disabled: {}", &modified_url.split('@').nth(1).unwrap_or("****"));
-
+    // Connection pool configuration 
     let pool = PgPoolOptions::new()
-        .max_connections(2)
-        .min_connections(1)
-        .acquire_timeout(Duration::from_secs(15))
-        .idle_timeout(Duration::from_secs(300))
-        .max_lifetime(Duration::from_secs(900))
+        .max_connections(5)
+        .min_connections(0)
+        .acquire_timeout(Duration::from_secs(30))
+        .idle_timeout(Duration::from_secs(600))
+        .max_lifetime(Duration::from_secs(1800))
         .test_before_acquire(true)
-        .connect(&modified_url)
+        .connect_with(options)
         .await?;
 
-    tracing::info!("Koneksi database berhasil dibuat");
-
+    tracing::info!("✅ Auth Service database pool initialized successfully");
     Ok(pool)
 }
 
@@ -136,6 +137,7 @@ pub struct AppState {
     pub redis: ConnectionManager,
     pub config: AppConfig,
     pub http_client: reqwest::Client,
+    pub rate_limiter: Arc<AuthRateLimiter>,
 }
 
 impl AppState {
@@ -154,7 +156,11 @@ impl AppState {
             .build()
             .map_err(|e| format!("Gagal menginisialisasi HTTP client: {}", e))?;
 
-        Ok(AppState { db, redis, config, http_client })
+        let rate_limiter = AuthRateLimiter::new()
+            .map_err(|e| format!("Gagal menginisialisasi rate limiter: {}", e))?;
+        let rate_limiter = Arc::new(rate_limiter);
+
+        Ok(AppState { db, redis, config, http_client, rate_limiter })
     }
 
     // Health check untuk semua dependencies

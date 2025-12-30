@@ -65,6 +65,23 @@ pub async fn submit_review(
         seller_id
     );
 
+    // Hanya customer yang bisa review seller
+    if auth.role != "customer" {
+        return Err(AppError::forbidden("Only customers can submit reviews"));
+    }
+
+    // Cek apakah customer pernah transaksi dengan seller
+    let has_transaction = check_customer_transaction_history(&pool, auth.user_id, seller_id).await?;
+    if !has_transaction {
+        return Err(AppError::forbidden("You can only review sellers you have completed transactions with"));
+    }
+
+    // Cek apakah sudah pernah review seller ini
+    let existing_review = check_existing_review(&pool, auth.user_id, seller_id).await?;
+    if existing_review {
+        return Err(AppError::bad_request("You have already reviewed this seller"));
+    }
+
     // Strict validation: prevent spam reviews di production
     if config.strict_validation() {
         let today_reviews = count_user_reviews_today(&pool, auth.user_id).await?;
@@ -102,7 +119,21 @@ pub async fn submit_review(
         }
     }
 
-    // Insert review ke database
+    // Validasi comment length untuk prevent abuse
+    if let Some(ref comment) = req.comment {
+        if comment.len() > 1000 {
+            return Err(AppError::validation("Comment maksimal 1000 karakter"));
+        }
+    }
+
+    // Validasi jumlah photos
+    if let Some(ref photos) = req.photos {
+        if photos.len() > 3 {
+            return Err(AppError::validation("Maksimal 3 foto per review"));
+        }
+    }
+
+    // Insert review ke database dengan proper vehicle_id
     let review_id = insert_review(&pool, auth.user_id, seller_id, req).await?;
 
     Ok(Json(SubmitReviewResponse {
@@ -385,14 +416,14 @@ async fn insert_review(
         INSERT INTO reviews (
             customer_id,
             seller_id,
-            vehicle_id,
             overall_rating,
             vehicle_condition_rating,
             accuracy_rating,
             service_rating,
             comment,
-            photos
-        ) VALUES ($1, $2, 0, $3, $4, $5, $6, $7, $8)
+            photos,
+            review_for_type
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'rental')
         RETURNING id
         "#
     )
@@ -407,5 +438,47 @@ async fn insert_review(
     .fetch_one(pool)
     .await?;
 
-    Ok(result.get::<i32, _>("id"))
+    Ok(result.get::<i64, _>("id") as i32)
+}
+
+// Cek apakah customer pernah transaksi dengan seller (completed transactions only)
+async fn check_customer_transaction_history(
+    pool: &PgPool,
+    customer_id: i32,
+    seller_id: i32,
+) -> Result<bool, AppError> {
+    let result = sqlx::query_scalar!(
+        r#"
+        SELECT EXISTS (
+            SELECT 1 FROM rental_bookings
+            WHERE customer_id = $1 AND seller_id = $2 AND status = 'selesai'
+            UNION
+            SELECT 1 FROM sale_orders
+            WHERE buyer_id = $1 AND seller_id = $2 AND status = 'completed'
+        )
+        "#,
+        customer_id,
+        seller_id
+    )
+    .fetch_one(pool)
+    .await?;
+
+    Ok(result.unwrap_or(false))
+}
+
+// Cek apakah customer sudah pernah review seller ini
+async fn check_existing_review(
+    pool: &PgPool,
+    customer_id: i32,
+    seller_id: i32,
+) -> Result<bool, AppError> {
+    let result = sqlx::query_scalar!(
+        "SELECT EXISTS(SELECT 1 FROM reviews WHERE customer_id = $1 AND seller_id = $2)",
+        customer_id,
+        seller_id
+    )
+    .fetch_one(pool)
+    .await?;
+
+    Ok(result.unwrap_or(false))
 }

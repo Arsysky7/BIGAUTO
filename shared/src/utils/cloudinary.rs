@@ -1,6 +1,6 @@
 use reqwest::multipart;
 use serde::{Deserialize, Serialize};
-use sha1::{Digest, Sha1};
+use sha2::{Digest, Sha256};
 use std::env;
 
 #[derive(Debug, Clone, Copy)]
@@ -237,7 +237,7 @@ impl CloudinaryClient {
     // Generate signature untuk authenticated requests
     fn generate_signature(&self, public_id: &str, timestamp: i64) -> String {
         let data = format!("public_id={}&timestamp={}{}", public_id, timestamp, self.api_secret);
-        let mut hasher = Sha1::new();
+        let mut hasher = Sha256::new();
         hasher.update(data.as_bytes());
         format!("{:x}", hasher.finalize())
     }

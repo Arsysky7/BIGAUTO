@@ -217,5 +217,19 @@ impl AppError {
         AppError::EmailError(msg.into())
     }
 }
+
+// From implementations untuk error conversion
+impl From<String> for AppError {
+    fn from(msg: String) -> Self {
+        AppError::InternalError(msg)
+    }
+}
+
+impl From<&str> for AppError {
+    fn from(msg: &str) -> Self {
+        AppError::InternalError(msg.to_string())
+    }
+}
+
 // Type alias untuk Result dengan AppError sebagai error type
 pub type AppResult<T> = Result<T, AppError>;

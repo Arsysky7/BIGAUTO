@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::{PgPool, Row, FromRow};
+use sqlx::{PgPool, FromRow};
 
 // Represent email verification token dari database
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]

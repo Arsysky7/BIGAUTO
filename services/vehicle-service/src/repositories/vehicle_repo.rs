@@ -19,7 +19,7 @@ pub async fn find_vehicles(
     let count_query = r#"
         SELECT COUNT(*) as count
         FROM vehicles v
-        WHERE v.is_available = true
+        WHERE v.status = 'available'
           AND (v.category IS NULL OR v.category = $1)
           AND (v.city IS NULL OR v.city = $2)
           AND (v.brand IS NULL OR v.brand = $3)

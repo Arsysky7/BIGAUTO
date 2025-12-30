@@ -1,4 +1,3 @@
-use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -9,6 +8,7 @@ mod handlers;
 mod middleware;
 mod routes;
 mod scheduler;
+mod utils;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -54,12 +54,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create router dengan CORS
     let app = routes::create_router(state.clone())
-        .layer(
-            CorsLayer::new()
-                .allow_origin(Any)
-                .allow_methods(Any)
-                .allow_headers(Any),
-        )
         .layer(TraceLayer::new_for_http());
 
     // Server address

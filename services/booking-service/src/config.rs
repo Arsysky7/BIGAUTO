@@ -1,6 +1,7 @@
-use sqlx::{postgres::PgPoolOptions, PgPool};
+use sqlx::{postgres::PgPoolOptions, postgres::PgConnectOptions, PgPool};
 use std::env;
 use std::time::Duration;
+use crate::middleware::rate_limit::RateLimiter;
 
 // Konfigurasi aplikasi dari environment variables
 #[derive(Debug, Clone)]
@@ -29,24 +30,24 @@ impl AppConfig {
         }
 
         let server_host = env::var("BOOKING_SERVICE_HOST")
-            .unwrap_or_else(|_| "0.0.0.0".to_string());
+            .expect("BOOKING_SERVICE_HOST harus diset di environment");
 
         let server_port = env::var("BOOKING_SERVICE_PORT")
             .ok()
             .and_then(|s| s.parse().ok())
-            .unwrap_or(3004);
+            .expect("BOOKING_SERVICE_PORT harus diset di environment");
 
         let environment = env::var("RUST_ENV")
-            .unwrap_or_else(|_| "development".to_string());
+            .expect("RUST_ENV harus diset di environment");
 
         let vehicle_service_url = env::var("VEHICLE_SERVICE_URL")
-            .unwrap_or_else(|_| "http://localhost:3001".to_string());
+            .expect("VEHICLE_SERVICE_URL harus diset di environment");
 
         let auth_service_url = env::var("AUTH_SERVICE_URL")
-            .unwrap_or_else(|_| "http://localhost:3002".to_string());
+            .expect("AUTH_SERVICE_URL harus diset di environment");
 
         let user_service_url = env::var("USER_SERVICE_URL")
-            .unwrap_or_else(|_| "http://localhost:3003".to_string());
+            .expect("USER_SERVICE_URL harus diset di environment");
 
         Ok(AppConfig {
             database_url,
@@ -75,26 +76,31 @@ impl AppConfig {
     }
 }
 
-// Inisialisasi database pool dengan konfigurasi optimal
+// Inisialisasi database connection pool
 pub async fn init_db_pool(database_url: &str) -> Result<PgPool, sqlx::Error> {
-    tracing::info!("Connecting to PostgreSQL...");
+    tracing::info!("🔌 Initializing Booking Service database connection...");
+
+    // Parse connection options dan disable prepared statements 
+    use std::str::FromStr;
+    let options = PgConnectOptions::from_str(database_url)?
+        .statement_cache_capacity(0);       
 
     let pool = PgPoolOptions::new()
-        .max_connections(3)
-        .min_connections(0)
-        .acquire_timeout(Duration::from_secs(30))
-        .idle_timeout(Duration::from_secs(600))
+        .max_connections(10)
+        .min_connections(3)
+        .acquire_timeout(Duration::from_secs(10))
+        .idle_timeout(Duration::from_secs(300))
         .max_lifetime(Duration::from_secs(1800))
-        .connect(database_url)
+        .test_before_acquire(true)
+        .connect_with(options)  
         .await?;
 
-    tracing::info!("Database connected");
+    tracing::info!("✅ Booking Service database pool initialized successfully for Big Auto platform");
     Ok(pool)
 }
 
 // Health check database connection
 pub async fn check_db_health(pool: &PgPool) -> bool {
-    // Simple connection test - just try to execute query
     sqlx::query("SELECT 1")
         .fetch_optional(pool)
         .await
@@ -107,6 +113,7 @@ pub struct AppState {
     pub db: PgPool,
     pub config: AppConfig,
     pub http_client: reqwest::Client,
+    pub rate_limiter: RateLimiter,
 }
 
 impl axum::extract::FromRef<AppState> for PgPool {
@@ -118,6 +125,13 @@ impl axum::extract::FromRef<AppState> for PgPool {
 impl axum::extract::FromRef<AppState> for AppConfig {
     fn from_ref(state: &AppState) -> Self {
         state.config.clone()
+    }
+}
+
+// Implement FromRef untuk bisa extract RateLimiter dari AppState
+impl axum::extract::FromRef<AppState> for RateLimiter {
+    fn from_ref(state: &AppState) -> Self {
+        state.rate_limiter.clone()
     }
 }
 
@@ -133,10 +147,26 @@ impl AppState {
             .build()
             .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
+        // Initialize Redis rate limiter 
+        let redis_url = env::var("REDIS_URL")
+            .unwrap_or_else(|_| {
+                tracing::error!("❌ REDIS_URL environment variable tidak diset");
+                panic!("REDIS_URL environment variable is REQUIRED for rate limiting");
+            });
+
+        tracing::info!("🔄 Initializing Redis rate limiter...");
+        let rate_limiter = RateLimiter::new(&redis_url)
+            .unwrap_or_else(|e| {
+                tracing::error!("❌ Failed to initialize Redis rate limiter: {}", e);
+                panic!("Failed to initialize Redis rate limiter: {}. Redis is MANDATORY", e);
+            });
+        tracing::info!("✅ Redis rate limiter initialized successfully (MANDATORY)");
+
         Ok(AppState {
             db,
             config,
             http_client,
+            rate_limiter,
         })
     }
 

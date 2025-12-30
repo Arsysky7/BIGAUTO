@@ -1,14 +1,16 @@
 use axum::{
     routing::{get, post, put, delete},
-    Router, Json, extract::State,
+    Router, Json, extract::State, http::StatusCode, middleware::{self, Next}, response::Response,
 };
 use sqlx::PgPool;
 use utoipa::{OpenApi, Modify};
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa_swagger_ui::SwaggerUi;
 use utoipa_redoc::{Redoc, Servable};
+use std::env;
 
 use crate::handlers::{vehicles, photos, filters};
+use crate::middleware::{auth::auth_middleware, rate_limit::rate_limit_middleware};
 use crate::config::{HealthStatus, check_db_health, AppState};
 
 struct SecurityAddon;
@@ -82,7 +84,7 @@ async fn health_check(State(pool): State<PgPool>) -> Json<HealthStatus> {
     })
 }
 
-// Buat router dengan semua endpoints
+// Buat router dengan JWT-Only security
 pub fn create_router(state: AppState) -> Router {
     // Log environment information
     if state.config.is_production() {
@@ -91,21 +93,8 @@ pub fn create_router(state: AppState) -> Router {
         tracing::info!("Running in DEVELOPMENT mode");
     }
 
-    let api_routes = Router::new()
-        // Vehicle routes
-        .route("/vehicles", get(vehicles::list_vehicles))
-        .route("/vehicles", post(vehicles::create_vehicle))
-        .route("/vehicles/{id}", get(vehicles::get_vehicle))
-        .route("/vehicles/{id}", put(vehicles::update_vehicle))
-        .route("/vehicles/{id}", delete(vehicles::delete_vehicle))
-        // Photo routes
-        .route("/vehicles/{id}/photos", post(photos::upload_photos))
-        .route("/vehicles/{id}/photos/{index}", delete(photos::delete_photo))
-        // Filter routes
-        .route("/filters/cities", get(filters::get_cities))
-        .route("/filters/brands", get(filters::get_brands))
-        .route("/filters/models", get(filters::get_models))
-        .with_state(state.clone());
+    // Build route hierarchy dengan proper security layering
+    let api_routes = build_api_routes_with_auth(state.clone());
 
     let openapi = ApiDoc::openapi();
 
@@ -114,4 +103,61 @@ pub fn create_router(state: AppState) -> Router {
         .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", openapi.clone()))
         .merge(Redoc::with_url("/redoc", openapi))
         .nest("/api", api_routes)
+        .layer(middleware::from_fn(security_headers_middleware))
+        .layer(middleware::from_fn_with_state(state.clone(), rate_limit_middleware))
+}
+
+// Middleware untuk menambahkan security headers HTTP
+async fn security_headers_middleware(request: axum::extract::Request, next: Next) -> Result<Response, StatusCode> {
+    let mut response = next.run(request).await;
+
+    let headers = response.headers_mut();
+
+    // Content Security Policy dari environment
+    let csp = env::var("CSP_POLICY").unwrap_or_else(|_| {
+        "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'".to_string()
+    });
+    headers.insert("Content-Security-Policy", csp.parse().unwrap());
+
+    // HSTS untuk HTTPS enforcement (hanya di production)
+    let environment = env::var("RUST_ENV").unwrap_or_else(|_| "development".to_string());
+    if environment == "production" {
+        let hsts = env::var("HSTS_MAX_AGE")
+            .unwrap_or_else(|_| "31536000".to_string()); 
+        headers.insert("Strict-Transport-Security", format!("max-age={}; includeSubDomains; preload", hsts).parse().unwrap());
+    }
+
+    // Protection headers lainnya
+    headers.insert("X-Content-Type-Options", "nosniff".parse().unwrap());
+    headers.insert("X-Frame-Options", "DENY".parse().unwrap());
+    headers.insert("X-XSS-Protection", "1; mode=block".parse().unwrap());
+    headers.insert("Referrer-Policy", "strict-origin-when-cross-origin".parse().unwrap());
+    headers.insert("Permissions-Policy", "geolocation=(), microphone=(), camera=()".parse().unwrap());
+
+    Ok(response)
+}
+
+// Build API routes dengan JWT authentication 
+fn build_api_routes_with_auth(state: AppState) -> Router {
+    // All API routes require JWT authentication
+    let api_routes = Router::new()
+        // Vehicles - All endpoints
+        .route("/vehicles", get(vehicles::list_vehicles))
+        .route("/vehicles/{id}", get(vehicles::get_vehicle))
+        .route("/vehicles", post(vehicles::create_vehicle))
+        .route("/vehicles/{id}", put(vehicles::update_vehicle))
+        .route("/vehicles/{id}", delete(vehicles::delete_vehicle))
+
+        // Photos - All endpoints
+        .route("/vehicles/{id}/photos", post(photos::upload_photos))
+        .route("/vehicles/{id}/photos/{index}", delete(photos::delete_photo))
+
+        // Filters - All endpoints
+        .route("/filters/cities", get(filters::get_cities))
+        .route("/filters/brands", get(filters::get_brands))
+        .route("/filters/models", get(filters::get_models))
+        .layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
+        .with_state(state);
+
+    api_routes
 }

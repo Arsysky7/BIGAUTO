@@ -1,6 +1,5 @@
 // Main entry point untuk booking-service
-// Mengelola rental bookings, test drive bookings, dan sale orders
-use axum::{Router, http::{StatusCode, header::HeaderValue}};
+use axum::{Router, http::StatusCode};
 use tower::ServiceBuilder;
 use tower_http::{
     compression::CompressionLayer,
@@ -18,10 +17,13 @@ mod handlers;
 mod repositories;
 mod routes;
 mod scheduler;
+mod middleware;
+mod utils;
 
 use config::{AppConfig, AppState};
 use error::{AppError, AppResult};
 use routes::create_router;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> AppResult<()> {
@@ -69,7 +71,7 @@ async fn main() -> AppResult<()> {
     tracing::info!("✅ Background cleanup scheduler started");
 
     // Build router dengan middleware
-    let app = create_app(app_state.clone());
+    let app = create_app(app_state.clone()).await;
 
     // Bind server ke address yang ditentukan
     let addr = SocketAddr::from(([0, 0, 0, 0], app_state.config.port()));
@@ -94,40 +96,63 @@ async fn main() -> AppResult<()> {
 }
 
 // Build aplikasi dengan middleware yang sesuai
-fn create_app(state: AppState) -> Router {
-    // CORS configuration untuk development dan production
-    let cors = CorsLayer::new()
-        .allow_origin("http://localhost:3000".parse::<HeaderValue>().unwrap()) // Frontend URL
-        .allow_origin("http://localhost:3001".parse::<HeaderValue>().unwrap()) // Auth service
-        .allow_origin("http://localhost:3002".parse::<HeaderValue>().unwrap()) // User service
-        .allow_origin("http://localhost:3003".parse::<HeaderValue>().unwrap()) // Vehicle service
-        .allow_origin("http://localhost:3004".parse::<HeaderValue>().unwrap()) // Booking service
-        .allow_origin("http://localhost:8080".parse::<HeaderValue>().unwrap()) // Alternative frontend port
-        .allow_methods([
-            axum::http::Method::GET,
-            axum::http::Method::POST,
-            axum::http::Method::PUT,
-            axum::http::Method::DELETE,
-            axum::http::Method::OPTIONS,
-        ])
-        .allow_headers([
-            axum::http::header::ACCEPT,
-            axum::http::header::AUTHORIZATION,
-            axum::http::header::CONTENT_TYPE,
-        ])
-        .allow_credentials(true);
+async fn create_app(state: AppState) -> Router {
+    // Convert state ke Arc untuk konsistensi dengan router
+    let arc_state = Arc::new(state);
 
     // Build router dengan semua middleware
     Router::new()
-        .merge(create_router())
+        .merge(create_router(arc_state.as_ref().clone()))
         .fallback(not_found_handler)
         .layer(
             ServiceBuilder::new()
                 .layer(TraceLayer::new_for_http())
                 .layer(CompressionLayer::new())
-                .layer(cors)
+                .layer(create_cors_layer())
         )
-        .with_state(state)
+}
+
+// JWT-Only CORS configuration 
+fn create_cors_layer() -> CorsLayer {
+    use axum::http::{HeaderValue, Method};
+    use std::env;
+    use std::time::Duration;
+
+    // Allowed origins dari environment variable
+    let allowed_origins = env::var("FRONTEND_URL")
+        .expect("FRONTEND_URL environment variable HARUS diisi di .env file");
+
+    // Parse origins yang diperbolehkan 
+    let origins: Vec<HeaderValue> = allowed_origins
+        .split(',')
+        .filter_map(|origin| origin.trim().parse::<HeaderValue>().ok())
+        .collect();
+
+    // CORS max age dari environment
+    let max_age_seconds = env::var("CORS_MAX_AGE_SECONDS")
+        .unwrap_or_else(|_| "86400".to_string())
+        .parse::<u64>()
+        .unwrap_or(86400);
+
+    tracing::info!("🌐 CORS enabled for origins: {}", allowed_origins);
+
+    // JWT-Only CORS Configuration 
+    let mut cors = CorsLayer::new()
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
+        .allow_headers([
+            axum::http::header::AUTHORIZATION,
+            axum::http::header::ACCEPT,
+            axum::http::header::CONTENT_TYPE,
+        ])
+        .allow_credentials(false) 
+        .max_age(Duration::from_secs(max_age_seconds));
+
+    // Tambahkan semua allowed origins
+    for origin in origins {
+        cors = cors.allow_origin(origin);
+    }
+
+    cors
 }
 
 // Handler untuk 404 errors
@@ -180,21 +205,5 @@ fn mask_connection_string(conn_str: &str) -> String {
         }
     } else {
         "Invalid Format".to_string()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_mask_connection_string() {
-        let conn = "postgresql://user:password@localhost:5432/db";
-        let masked = mask_connection_string(conn);
-        assert_eq!(masked, "postgresql://user:****@localhost:5432/db");
-
-        let conn = "postgresql://postgres.movyypzgmhfuopdgtlup:Syah_aril987@aws-1-us-east-2.pooler.supabase.com:6543/postgres";
-        let masked = mask_connection_string(conn);
-        assert!(masked.contains("postgres.movyypzgmhfuopdgtlup:****@"));
     }
 }

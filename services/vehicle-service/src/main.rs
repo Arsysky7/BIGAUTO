@@ -1,4 +1,5 @@
-use tower_http::cors::{Any, CorsLayer};
+use std::time::Duration;
+use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -10,6 +11,7 @@ mod middleware;
 mod repositories;
 mod routes;
 mod scheduler;
+mod utils;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -43,12 +45,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("✅ Background cleanup scheduler started");
 
     let app = routes::create_router(state.clone())
-        .layer(
-            CorsLayer::new()
-                .allow_origin(Any)
-                .allow_methods(Any)
-                .allow_headers(Any),
-        )
+        .layer(create_cors_layer())
         .layer(TraceLayer::new_for_http());
 
     let addr = format!("{}:{}", state.config.server_host, state.config.server_port);
@@ -62,4 +59,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+// Membuat CORS layer yang aman berdasarkan environment variables
+fn create_cors_layer() -> CorsLayer {
+    use axum::http::{HeaderValue, Method};
+    use std::env;
+
+    // Allowed origins dari environment variable
+    let allowed_origins = env::var("FRONTEND_URL")
+        .expect("FRONTEND_URL environment variable HARUS diisi di .env file");
+
+    // Parse origins yang diperbolehkan
+    let origins: Vec<HeaderValue> = allowed_origins
+        .split(',')
+        .filter_map(|origin| origin.trim().parse::<HeaderValue>().ok())
+        .collect();
+
+    // CORS max age dari environment
+    let max_age_seconds = env::var("CORS_MAX_AGE_SECONDS")
+        .expect("CORS_MAX_AGE_SECONDS environment variable HARUS diisi di .env file")
+        .parse::<u64>()
+        .expect("CORS_MAX_AGE_SECONDS harus berupa angka (detik)");
+
+    // Build CORS layer dengan origins yang dinamis
+    let mut cors = CorsLayer::new()
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
+        .allow_headers([
+            axum::http::header::AUTHORIZATION,
+            axum::http::header::CONTENT_TYPE,
+        ])
+        .allow_credentials(false)  
+        .max_age(Duration::from_secs(max_age_seconds));
+
+    // Tambahkan semua allowed origins
+    for origin in origins {
+        cors = cors.allow_origin(origin);
+    }
+
+    cors
 }

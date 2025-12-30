@@ -14,7 +14,7 @@ use crate::{
     AppState,
 };
 
-use shared::utils::auth_middleware::{AuthUser, AuthCustomer, AuthSeller};
+use crate::middleware::auth::{AuthUser, AuthCustomer, AuthSeller};
 use shared::utils::validation;
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -46,8 +46,8 @@ pub async fn create_testdrive_booking(
 ) -> Result<Json<TestDriveBookingResponse>, AppError> {
     tracing::info!(
         "Customer {} ({}) creating testdrive for vehicle {}",
-        auth.claims.sub,
-        auth.claims.email,
+        auth.user_id,
+        auth.email,
         payload.vehicle_id
     );
 
@@ -92,7 +92,7 @@ pub async fn create_testdrive_booking(
     // Create test drive booking
     let testdrive = testdrive_repo::create_testdrive(
         &state.db,
-        auth.claims.sub,
+        auth.user_id,
         seller_id,
         &payload,
     ).await?;
@@ -124,7 +124,7 @@ pub async fn get_testdrive_booking(
         .ok_or_else(|| AppError::not_found("Test drive booking tidak ditemukan"))?;
 
     // Check authorization (customer or seller)
-    if testdrive.customer_id != auth.claims.sub && testdrive.seller_id != auth.claims.sub {
+    if testdrive.customer_id != auth.user_id && testdrive.seller_id != auth.user_id {
         return Err(AppError::forbidden("Anda tidak memiliki akses ke booking ini"));
     }
 
@@ -149,7 +149,7 @@ pub async fn get_customer_testdrive_bookings(
 ) -> Result<Json<Vec<TestDriveBookingResponse>>, AppError> {
     let testdrives = testdrive_repo::find_testdrives_by_customer(
         &state.db,
-        auth.claims.sub,
+        auth.user_id,
         filter.status,
     ).await?;
 
@@ -179,7 +179,7 @@ pub async fn get_seller_testdrive_bookings(
 ) -> Result<Json<Vec<TestDriveBookingResponse>>, AppError> {
     let testdrives = testdrive_repo::find_testdrives_by_seller(
         &state.db,
-        auth.claims.sub,
+        auth.user_id,
         filter.status,
     ).await?;
 
@@ -213,7 +213,7 @@ pub async fn accept_testdrive_booking(
         .await?
         .ok_or_else(|| AppError::not_found("Test drive booking tidak ditemukan"))?;
 
-    if testdrive.seller_id != auth.claims.sub {
+    if testdrive.seller_id != auth.user_id {
         return Err(AppError::forbidden("Anda bukan seller dari vehicle ini"));
     }
 
@@ -224,7 +224,7 @@ pub async fn accept_testdrive_booking(
     // Accept test drive booking
     let updated = testdrive_repo::confirm_testdrive(&state.db, id).await?;
 
-    tracing::info!("Test drive {} accepted by seller {}", id, auth.claims.sub);
+    tracing::info!("Test drive {} accepted by seller {}", id, auth.user_id);
 
     Ok(Json(TestDriveBookingResponse::from(updated)))
 }
@@ -253,7 +253,7 @@ pub async fn reschedule_testdrive_booking(
         .await?
         .ok_or_else(|| AppError::not_found("Test drive booking tidak ditemukan"))?;
 
-    if testdrive.seller_id != auth.claims.sub {
+    if testdrive.seller_id != auth.user_id {
         return Err(AppError::forbidden("Anda bukan seller dari vehicle ini"));
     }
 
@@ -266,7 +266,7 @@ pub async fn reschedule_testdrive_booking(
 
     let updated = testdrive_repo::reschedule_testdrive(&state.db, id, reschedule_slots).await?;
 
-    tracing::info!("Test drive {} rescheduled by seller {}", id, auth.claims.sub);
+    tracing::info!("Test drive {} rescheduled by seller {}", id, auth.user_id);
 
     Ok(Json(TestDriveBookingResponse::from(updated)))
 }
@@ -295,7 +295,7 @@ pub async fn choose_reschedule_slot(
         .await?
         .ok_or_else(|| AppError::not_found("Test drive booking tidak ditemukan"))?;
 
-    if testdrive.customer_id != auth.claims.sub {
+    if testdrive.customer_id != auth.user_id {
         return Err(AppError::forbidden("Anda tidak memiliki akses ke booking ini"));
     }
 
@@ -305,7 +305,7 @@ pub async fn choose_reschedule_slot(
 
     let updated = testdrive_repo::choose_reschedule_slot(&state.db, id, payload.slot_index).await?;
 
-    tracing::info!("Customer {} chose slot {} for testdrive {}", auth.claims.sub, payload.slot_index, id);
+    tracing::info!("Customer {} chose slot {} for testdrive {}", auth.user_id, payload.slot_index, id);
 
     Ok(Json(TestDriveBookingResponse::from(updated)))
 }
@@ -334,7 +334,7 @@ pub async fn confirm_testdrive_booking(
         .await?
         .ok_or_else(|| AppError::not_found("Test drive booking tidak ditemukan"))?;
 
-    if testdrive.seller_id != auth.claims.sub {
+    if testdrive.seller_id != auth.user_id {
         return Err(AppError::forbidden("Anda bukan seller dari vehicle ini"));
     }
 
@@ -349,7 +349,7 @@ pub async fn confirm_testdrive_booking(
 
     let updated = testdrive_repo::confirm_testdrive(&state.db, id).await?;
 
-    tracing::info!("Test drive {} confirmed by seller {}", id, auth.claims.sub);
+    tracing::info!("Test drive {} confirmed by seller {}", id, auth.user_id);
 
     Ok(Json(TestDriveBookingResponse::from(updated)))
 }
@@ -378,7 +378,7 @@ pub async fn complete_testdrive_booking(
         .await?
         .ok_or_else(|| AppError::not_found("Test drive booking tidak ditemukan"))?;
 
-    if testdrive.seller_id != auth.claims.sub {
+    if testdrive.seller_id != auth.user_id {
         return Err(AppError::forbidden("Anda bukan seller dari vehicle ini"));
     }
 
@@ -393,7 +393,7 @@ pub async fn complete_testdrive_booking(
 
     let updated = testdrive_repo::complete_testdrive(&state.db, id).await?;
 
-    tracing::info!("Test drive {} completed by seller {}", id, auth.claims.sub);
+    tracing::info!("Test drive {} completed by seller {}", id, auth.user_id);
 
     Ok(Json(TestDriveBookingResponse::from(updated)))
 }
@@ -422,7 +422,7 @@ pub async fn cancel_testdrive_booking(
         .await?
         .ok_or_else(|| AppError::not_found("Test drive booking tidak ditemukan"))?;
 
-    if testdrive.customer_id != auth.claims.sub {
+    if testdrive.customer_id != auth.user_id {
         return Err(AppError::forbidden("Anda tidak memiliki akses ke booking ini"));
     }
 
@@ -432,7 +432,7 @@ pub async fn cancel_testdrive_booking(
 
     testdrive_repo::cancel_testdrive(&state.db, id, &payload.cancel_reason).await?;
 
-    tracing::info!("Test drive {} cancelled by customer {}", id, auth.claims.sub);
+    tracing::info!("Test drive {} cancelled by customer {}", id, auth.user_id);
 
     Ok(Json(MessageResponse {
         message: "Test drive booking berhasil dibatalkan".to_string(),
@@ -456,11 +456,11 @@ pub async fn cancel_testdrive_booking(
 )]
 pub async fn timeout_expired_testdrives(
     State(state): State<AppState>,
-    AuthUser { claims }: AuthUser, // Internal use only
+    auth: AuthUser, 
 ) -> Result<Json<serde_json::Value>, AppError> {
     let timeout_count = testdrive_repo::timeout_expired_testdrives(&state.db).await?;
 
-    tracing::info!("Timed out {} expired test drives by user {}", timeout_count, claims.sub);
+    tracing::info!("Timed out {} expired test drives by user {}", timeout_count, auth.user_id);
 
     Ok(Json(serde_json::json!({
         "timeout_count": timeout_count,

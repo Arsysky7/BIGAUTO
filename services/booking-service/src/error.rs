@@ -13,6 +13,7 @@ pub type AppResult<T = ()> = Result<T, AppError>;
 pub enum AppError {
     DatabaseError(sqlx::Error),
     NotFound(String),
+    Unauthorized(String),
     Forbidden(String),
     BadRequest(String),
     ValidationError(String),
@@ -32,6 +33,10 @@ impl AppError {
 impl AppError {
     pub fn not_found(msg: impl Into<String>) -> Self {
         Self::NotFound(msg.into())
+    }
+
+    pub fn unauthorized(msg: impl Into<String>) -> Self {
+        Self::Unauthorized(msg.into())
     }
 
     pub fn forbidden(msg: impl Into<String>) -> Self {
@@ -86,6 +91,7 @@ impl IntoResponse for AppError {
                 )
             },
             AppError::NotFound(msg) => (StatusCode::NOT_FOUND, "data_tidak_ditemukan", msg.clone()),
+            AppError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, "autentikasi_diperlukan", msg.clone()),
             AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, "akses_dilarang", msg.clone()),
             AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, "request_tidak_valid", msg.clone()),
             AppError::ValidationError(msg) => {

@@ -11,6 +11,11 @@ use crate::utils::{email, hash, jwt, otp, validation};
 use chrono::{Duration, Utc};
 use redis::AsyncCommands;
 use uuid::Uuid;
+use sha2::{Digest, Sha256};
+// Menentukan role user untuk JWT claims berdasarkan status customer/seller
+fn determine_user_role(user: &User) -> String {
+    user.get_jwt_role()
+}
 
 
 // struktur data untuk registrasi
@@ -445,25 +450,27 @@ pub async fn login_step2_verify_otp(
         .await?
         .ok_or_else(|| AppError::NotFoundError("User tidak ditemukan".to_string()))?;
 
-    // Determine role
-    let role = if user.is_seller.unwrap_or(false) {
-        "seller"
-    } else {
-        "customer"
-    };
+    // Determine role based on user data 
+    let role = determine_user_role(&user);
+
 
     // Generate JWT tokens menggunakan config dari AppState
-    let (access_token, access_jti) = jwt::generate_access_token(
+    let access_token = jwt::generate_access_token(
         user.id,
         &user.email,
-        role,
+        &role,
         &state.config.jwt_secret,
         state.config.jwt_access_expiry
     )?;
+
+    // Extract JTI dari access token untuk tracking
+    let claims = jwt::validate_token(&access_token, &state.config.jwt_secret, &state.db)
+        .await?;
+    let access_jti = claims.jti.clone();
     let refresh_token = jwt::generate_refresh_token(
         user.id,
         &user.email,
-        role,
+        &role,
         &state.config.jwt_secret,
         state.config.jwt_refresh_expiry
     )?;
@@ -472,7 +479,7 @@ pub async fn login_step2_verify_otp(
     let session_data = NewUserSession {
         user_id: user.id,
         refresh_token: refresh_token.clone(),
-        access_token_jti: Some(access_jti.clone()), // SAVE JTI to database
+        access_token_jti: Some(access_jti.clone()),
         user_agent,
         ip_address,
         device_name: None,
@@ -592,8 +599,9 @@ pub async fn refresh_access_token(
     state: &AppState,
     refresh_token: &str,
 ) -> Result<String, AppError> {
-    // Validasi refresh token menggunakan secret dari config
-    let claims = jwt::validate_token(refresh_token, &state.config.jwt_secret)?;
+    // Validasi refresh token
+    let claims = jwt::validate_token(refresh_token, &state.config.jwt_secret, &state.db)
+        .await?;
 
     // Cek apakah token type = refresh
     if claims.token_type != "refresh" {
@@ -619,21 +627,22 @@ pub async fn refresh_access_token(
         .await?
         .ok_or_else(|| AppError::NotFoundError("User tidak ditemukan".to_string()))?;
 
-    // Determine role
-    let role = if user.is_seller.unwrap_or(false) {
-        "seller"
-    } else {
-        "customer"
-    };
+    // Determine role based on user data
+    let role = determine_user_role(&user);
 
-    // Generate access token baru WITH NEW JTI
-    let (new_access_token, new_jti) = jwt::generate_access_token(
+    // Generate access token
+    let new_access_token = jwt::generate_access_token(
         user.id,
         &user.email,
-        role,
+        &role,
         &state.config.jwt_secret,
         state.config.jwt_access_expiry
     )?;
+
+    // Extract JTI dari new access token
+    let new_claims = jwt::validate_token(&new_access_token, &state.config.jwt_secret, &state.db)
+        .await?;
+    let new_jti = new_claims.jti.clone();
 
     // Update session dengan JTI baru untuk tracking
     UserSession::update_access_token_jti(&state.db, session.id, &new_jti).await?;
@@ -646,10 +655,152 @@ pub async fn refresh_access_token(
     Ok(new_access_token)
 }
 
-// Logout user dan invalidate session menggunakan method invalidate_by_token
-pub async fn logout(state: &AppState, refresh_token: &str) -> Result<String, AppError> {
-    // Invalidate session by refresh token (lebih efisien daripada find dulu baru invalidate)
-    UserSession::invalidate_by_token(&state.db, refresh_token).await?;
 
-    Ok("Logout berhasil".to_string())
+
+/// Logout user dengan keamanan enterprise: blacklist semua JWT tokens
+pub async fn logout(state: &AppState, refresh_token: &str) -> Result<String, AppError> {
+    let token_hash = hash_token_for_logging(refresh_token);
+    tracing::info!("Processing logout request - token: {}...", token_hash);
+
+    // Extract data dari refresh token untuk tracking
+    let token_claims = validate_refresh_token(refresh_token, &state.config.jwt_secret, &state.db).await?;
+    let user_id = token_claims.sub;
+    let refresh_jti = token_claims.jti;
+
+    // Execute security-critical operations secara atomik
+    execute_logout_security_procedures(&state, user_id, &refresh_jti).await?;
+
+    tracing::info!("Logout completed successfully - user_id: {}", user_id);
+    Ok("Logout berhasil. Semua token telah diblacklist.".to_string())
+}
+
+/// Validasi refresh token sebelum proses logout
+async fn validate_refresh_token(token: &str, jwt_secret: &str, db: &sqlx::PgPool) -> Result<crate::utils::jwt::TokenClaims, AppError> {
+    let claims = crate::utils::jwt::validate_token(token, jwt_secret, db)
+        .await
+        .map_err(|e| AppError::AuthenticationError(format!("Token tidak valid: {}", e)))?;
+
+    if claims.token_type != "refresh" {
+        return Err(AppError::TokenError("Token type tidak sesuai untuk logout".to_string()));
+    }
+
+    Ok(claims)
+}
+
+/// Hash token untuk logging aman 
+fn hash_token_for_logging(token: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(token.as_bytes());
+    let hash = hasher.finalize();
+    format!("{:x}", hash)[..16].to_string()
+}
+
+/// Eksekusi prosedur keamanan logout secara atomik
+async fn execute_logout_security_procedures(
+    state: &AppState,
+    user_id: i32,
+    refresh_jti: &str,
+) -> Result<(), AppError> {
+    let mut tx = state.db.begin().await
+        .map_err(|e| AppError::InternalError(format!("Gagal memulai transaksi database: {}", e)))?;
+
+    // Blacklist refresh token dengan alasan dan expiry
+    blacklist_jwt_token(&mut tx, refresh_jti, "refresh", user_id, "user_logout").await?;
+
+    // Cari dan blacklist semua access tokens terkait
+    blacklist_related_access_tokens(&mut tx, user_id, refresh_jti).await?;
+
+    // Commit semua perubahan keamanan
+    tx.commit().await
+        .map_err(|e| AppError::InternalError(format!("Gagal commit transaksi logout: {}", e)))?;
+
+    // Invalidate user sessions di background untuk performance
+    let db_clone = state.db.clone();
+    tokio::spawn(async move {
+        if let Err(e) = invalidate_user_sessions(&db_clone, user_id).await {
+            tracing::error!("Failed to invalidate user sessions: {}", e);
+        }
+    });
+
+    Ok(())
+}
+
+/// Blacklist JWT token menggunakan secure function 
+async fn blacklist_jwt_token(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    jti: &str,
+    token_type: &str,
+    user_id: i32,
+    reason: &str,
+) -> Result<(), AppError> {
+    // Gunakan secure function untuk blacklist token
+    sqlx::query_scalar!("SELECT blacklist_token($1, $2, $3)",
+        jti,
+        token_type,
+        reason
+    )
+    .fetch_one(tx.as_mut())
+    .await
+    .map_err(|e| AppError::InternalError(format!("Gagal blacklist token via secure function: {}", e)))?;
+
+    tracing::info!("Successfully blacklisted token: jti={}, type={}, user_id={}", jti, token_type, user_id);
+    Ok(())
+}
+
+/// Cari dan blacklist semua access tokens terkait dengan session
+async fn blacklist_related_access_tokens(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: i32,
+    refresh_jti: &str,
+) -> Result<(), AppError> {
+    // Cari session terkait dengan refresh token menggunakan query
+    let session_data: Option<i32> = sqlx::query_scalar!(
+        "SELECT id FROM user_sessions WHERE refresh_token = $1 AND expires_at > NOW() AND is_active = true",
+        refresh_jti
+    )
+    .fetch_optional(tx.as_mut())
+    .await?;
+
+    if let Some(session_id) = session_data {
+        // Ambil access token JTI dari session
+        let access_jti = sqlx::query_scalar!(
+            "SELECT access_token_jti FROM user_sessions WHERE id = $1",
+            session_id
+        )
+        .fetch_optional(tx.as_mut())
+        .await?
+        .flatten(); 
+
+        if let Some(jti) = access_jti {
+            blacklist_jwt_token(&mut *tx, jti.as_str(), "access", user_id, "user_logout").await?;
+        }
+
+        // Update session menjadi tidak aktif
+        sqlx::query!(
+            "UPDATE user_sessions SET is_active = false, updated_at = NOW() WHERE id = $1",
+            session_id
+        )
+        .execute(tx.as_mut())
+        .await
+        .map_err(|e| AppError::InternalError(format!("Gagal update session logout: {}", e)))?;
+    } else {
+        tracing::debug!("No active session found for refresh token during logout");
+    }
+
+    Ok(())
+}
+
+/// Invalidate semua session user untuk multi-device logout
+async fn invalidate_user_sessions(db: &sqlx::PgPool, user_id: i32) -> Result<(), AppError> {
+    // Update semua session user menjadi tidak aktif
+    sqlx::query!(
+        "UPDATE user_sessions SET is_active = false, updated_at = NOW() WHERE user_id = $1 AND is_active = true",
+        user_id
+    )
+    .execute(db)
+    .await
+    .map_err(|e| AppError::InternalError(format!("Gagal invalidate user sessions: {}", e)))?;
+
+    tracing::info!("Invalidated all sessions for user_id: {}", user_id);
+    Ok(())
 }

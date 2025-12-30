@@ -1,17 +1,17 @@
+// JWT-Only Authentication Middleware for Vehicle Service
+
 use axum::{
-    extract::FromRequestParts,
-    http::request::Parts,
-    RequestPartsExt,
+    extract::{Request, State},
+    http::HeaderMap,
+    response::Response,
+    middleware::Next,
 };
-use axum_extra::{
-    headers::{authorization::Bearer, Authorization},
-    TypedHeader,
-};
-use shared::utils::jwt;
+use crate::{config::AppState, error::AppError};
 
-use crate::error::AppError;
+// Import JWT validation from utils
+use crate::utils::jwt;
 
-// User terautentikasi (any user with valid JWT)
+// User yang sudah terautentikasi
 #[derive(Debug, Clone)]
 pub struct AuthUser {
     pub user_id: i32,
@@ -19,58 +19,109 @@ pub struct AuthUser {
     pub role: String,
 }
 
-// Seller terautentikasi (hanya seller yang bisa create/update vehicle)
+// Implement Axum extractor untuk AuthUser
+impl<S> axum::extract::FromRequestParts<S> for AuthUser
+where
+    S: Send + Sync,
+{
+    type Rejection = AppError;
+
+    async fn from_request_parts<'life0, 'life1>(
+        parts: &'life0 mut axum::http::request::Parts,
+        _state: &'life1 S,
+    ) -> Result<Self, Self::Rejection> {
+        parts
+            .extensions
+            .get::<AuthUser>()
+            .cloned()
+            .ok_or_else(|| AppError::unauthorized("Authentication required"))
+    }
+}
+
+// Seller terautentikasi
 #[derive(Debug, Clone)]
 pub struct AuthSeller {
     pub user_id: i32,
     pub email: String,
 }
 
-impl<S> FromRequestParts<S> for AuthUser
+// Implement Axum extractor untuk AuthSeller
+impl<S> axum::extract::FromRequestParts<S> for AuthSeller
 where
     S: Send + Sync,
 {
     type Rejection = AppError;
 
-    async fn from_request_parts(
-        parts: &mut Parts,
-        _state: &S,
+    async fn from_request_parts<'life0, 'life1>(
+        parts: &'life0 mut axum::http::request::Parts,
+        _state: &'life1 S,
     ) -> Result<Self, Self::Rejection> {
-        let TypedHeader(Authorization(bearer)) = parts
-            .extract::<TypedHeader<Authorization<Bearer>>>()
-            .await
-            .map_err(|_| AppError::unauthorized("Token tidak ditemukan"))?;
+        // Cari AuthUser yang sudah di-inject 
+        let auth_user = parts
+            .extensions
+            .get::<AuthUser>()
+            .ok_or_else(|| AppError::unauthorized("Authentication required"))?;
 
-        let claims = jwt::validate_token(bearer.token())
-            .map_err(|_| AppError::unauthorized("Token tidak valid atau sudah expired"))?;
+        // Validasi role seller
+        if auth_user.role != "seller" {
+            return Err(AppError::forbidden("Seller authentication required"));
+        }
 
-        Ok(AuthUser {
-            user_id: claims.sub,
-            email: claims.email,
-            role: claims.role,
+        Ok(AuthSeller {
+            user_id: auth_user.user_id,
+            email: auth_user.email.clone(),
         })
     }
 }
 
-impl<S> FromRequestParts<S> for AuthSeller
-where
-    S: Send + Sync,
-{
-    type Rejection = AppError;
+// Extract JWT token dari Authorization header
+fn extract_jwt_token(headers: &HeaderMap) -> Result<String, AppError> {
+    let auth_header = headers
+        .get("authorization")
+        .ok_or_else(|| AppError::unauthorized("Authorization header missing"))?
+        .to_str()
+        .map_err(|_| AppError::unauthorized("Invalid authorization header"))?;
 
-    async fn from_request_parts(
-        parts: &mut Parts,
-        _state: &S,
-    ) -> Result<Self, Self::Rejection> {
-        let user = AuthUser::from_request_parts(parts, _state).await?;
-
-        if user.role != "seller" {
-            return Err(AppError::forbidden("Endpoint ini hanya untuk seller"));
-        }
-
-        Ok(AuthSeller {
-            user_id: user.user_id,
-            email: user.email,
-        })
+    if !auth_header.starts_with("Bearer ") {
+        return Err(AppError::unauthorized("Invalid authorization header format"));
     }
+
+    Ok(auth_header[7..].to_string())
+}
+
+// Authentication middleware dengan JWT blacklist check
+pub async fn auth_middleware(
+    State(state): State<AppState>,
+    mut request: Request,
+    next: Next,
+) -> Result<Response, AppError> {
+    // Extract JWT token
+    let token = extract_jwt_token(request.headers())?;
+
+    // Validasi JWT dengan blacklist check
+    let claims = jwt::validate_token(&token, &state.db)
+        .await
+        .map_err(|_| AppError::unauthorized("Invalid or expired JWT token"))?;
+
+    // Clone claims untuk multiple uses
+    let user_id = claims.sub;
+    let email = claims.email.clone();
+    let role = claims.role.clone();
+
+    // Inject user data ke request extensions
+    request.extensions_mut().insert(AuthUser {
+        user_id,
+        email: email.clone(),
+        role: role.clone(),
+    });
+
+    // Log untuk audit trail
+    tracing::debug!(
+        "User authenticated - id: {}, email: {}, role: {}",
+        user_id,
+        email,
+        role
+    );
+
+    Ok(next.run(request).await)
 }

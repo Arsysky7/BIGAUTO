@@ -13,7 +13,7 @@ use crate::{
     AppState,
 };
 
-use shared::utils::auth_middleware::{AuthUser, AuthCustomer, AuthSeller};
+use crate::middleware::auth::{AuthUser, AuthCustomer, AuthSeller};
 use shared::utils::validation;
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -46,8 +46,8 @@ pub async fn create_rental_booking(
 ) -> Result<Json<RentalBookingResponse>, AppError> {
     tracing::info!(
         "Customer {} ({}) creating rental for vehicle {}",
-        auth.claims.sub,
-        auth.claims.email,
+        auth.user_id,
+        auth.email,
         payload.vehicle_id
     );
 
@@ -105,7 +105,7 @@ pub async fn create_rental_booking(
     // Create rental booking
     let rental = rental_repo::create_rental(
         &state.db,
-        auth.claims.sub,
+        auth.user_id,
         seller_id,
         price_per_day,
         &payload,
@@ -138,7 +138,7 @@ pub async fn get_rental_booking(
         .ok_or_else(|| AppError::not_found("Rental booking tidak ditemukan"))?;
 
     // Check authorization (customer or seller)
-    if rental.customer_id != auth.claims.sub && rental.seller_id != auth.claims.sub {
+    if rental.customer_id != auth.user_id && rental.seller_id != auth.user_id {
         return Err(AppError::forbidden("Anda tidak memiliki akses ke booking ini"));
     }
 
@@ -163,7 +163,7 @@ pub async fn get_customer_rental_bookings(
 ) -> Result<Json<Vec<RentalBookingResponse>>, AppError> {
     let rentals = rental_repo::find_rentals_by_customer(
         &state.db,
-        auth.claims.sub,
+        auth.user_id,
         filter.status,
     ).await?;
 
@@ -193,7 +193,7 @@ pub async fn get_seller_rental_bookings(
 ) -> Result<Json<Vec<RentalBookingResponse>>, AppError> {
     let rentals = rental_repo::find_rentals_by_seller(
         &state.db,
-        auth.claims.sub,
+        auth.user_id,
         filter.status,
     ).await?;
 
@@ -229,7 +229,7 @@ pub async fn validate_pickup(
         .await?
         .ok_or_else(|| AppError::not_found("Rental booking tidak ditemukan"))?;
 
-    if rental.seller_id != auth.claims.sub {
+    if rental.seller_id != auth.user_id {
         return Err(AppError::forbidden("Anda bukan seller dari vehicle ini"));
     }
 
@@ -239,7 +239,7 @@ pub async fn validate_pickup(
 
     let updated = rental_repo::validate_pickup(&state.db, id, &payload.ktp_photo).await?;
 
-    tracing::info!("Rental {} pickup validated by seller {}", id, auth.claims.sub);
+    tracing::info!("Rental {} pickup validated by seller {}", id, auth.user_id);
 
     Ok(Json(RentalBookingResponse::from(updated)))
 }
@@ -267,7 +267,7 @@ pub async fn validate_return(
         .await?
         .ok_or_else(|| AppError::not_found("Rental booking tidak ditemukan"))?;
 
-    if rental.seller_id != auth.claims.sub {
+    if rental.seller_id != auth.user_id {
         return Err(AppError::forbidden("Anda bukan seller dari vehicle ini"));
     }
 
@@ -282,7 +282,7 @@ pub async fn validate_return(
 
     let updated = rental_repo::validate_return(&state.db, id).await?;
 
-    tracing::info!("Rental {} return validated by seller {}", id, auth.claims.sub);
+    tracing::info!("Rental {} return validated by seller {}", id, auth.user_id);
 
     Ok(Json(RentalBookingResponse::from(updated)))
 }
@@ -311,7 +311,7 @@ pub async fn cancel_rental_booking(
         .await?
         .ok_or_else(|| AppError::not_found("Rental booking tidak ditemukan"))?;
 
-    if rental.customer_id != auth.claims.sub {
+    if rental.customer_id != auth.user_id {
         return Err(AppError::forbidden("Anda tidak memiliki akses ke booking ini"));
     }
 
@@ -321,7 +321,7 @@ pub async fn cancel_rental_booking(
 
     rental_repo::cancel_rental(&state.db, id, &payload.cancel_reason).await?;
 
-    tracing::info!("Rental {} cancelled by customer {}", id, auth.claims.sub);
+    tracing::info!("Rental {} cancelled by customer {}", id, auth.user_id);
 
     Ok(Json(MessageResponse {
         message: "Rental booking berhasil dibatalkan".to_string(),
@@ -353,7 +353,7 @@ pub async fn cancel_rental_booking(
 pub async fn update_rental_booking_status(
     State(state): State<AppState>,
     Path(id): Path<i64>,
-    AuthUser { claims }: AuthUser,
+    auth: AuthUser,
     Json(payload): Json<UpdateRentalStatusRequest>,
 ) -> Result<Json<RentalBookingResponse>, AppError> {
     // Cek booking ada
@@ -362,7 +362,7 @@ pub async fn update_rental_booking_status(
         .ok_or(AppError::NotFound("Booking tidak ditemukan".to_string()))?;
 
     // Validasi akses (hanya customer atau seller yang terkait)
-    if claims.sub != rental.customer_id && claims.sub != rental.seller_id {
+    if auth.user_id != rental.customer_id && auth.user_id != rental.seller_id {
         return Err(AppError::Forbidden("Akses ditolak".to_string()));
     }
 

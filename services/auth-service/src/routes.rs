@@ -1,12 +1,15 @@
-use axum::{routing::{get, post, put, delete}, Json, Router};
+use axum::{Router, middleware};
 use serde::Serialize;
 use utoipa::{OpenApi, Modify};
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::config::AppState;
-use crate::error::AppResult;
-use crate::handlers::{auth, user, session, otp};
+use crate::middleware::{
+    rate_limit::auth_rate_limit_middleware,
+    security_headers::security_headers_middleware,
+    cors::configure_cors,
+};
 
 // Security scheme modifier for Bearer authentication
 struct SecurityAddon;
@@ -33,7 +36,7 @@ impl Modify for SecurityAddon {
     info(
         title = "Big Auto - Auth Service API",
         version = "0.1.0",
-        description = "Authentication and User Management Service for Big Auto platform\n\n## Features\n\n- 🔐 Email + Password Authentication with 2FA (OTP)\n- ✉️ Email Verification\n- 🔄 JWT Token Refresh\n- 👤 User Profile Management\n- 🏪 Seller Upgrade\n- 📱 Multi-device Session Management\n\n## Authentication Flow\n\n1. **Register**: POST `/api/auth/register` - Create new account\n2. **Verify Email**: GET `/api/auth/verify-email?token={token}` - Verify email from link\n3. **Login Step 1**: POST `/api/auth/login` - Send OTP to email\n4. **Login Step 2**: POST `/api/auth/verify-otp` - Verify OTP and get JWT tokens\n5. **Use Access Token**: Include in `Authorization: Bearer {token}` header\n6. **Refresh Token**: POST `/api/auth/refresh` - Get new access token (uses httpOnly cookie)\n\n## Security\n\n- Passwords hashed with Argon2\n- JWT tokens (15 min access, 7 days refresh)\n- HttpOnly cookies for refresh tokens\n- Rate limiting on OTP requests\n- Session tracking with device info\n",
+        description = "JWT-Only Authentication and User Management Service for Big Auto platform\n\n## Features\n\n- 🔐 JWT-Only Authentication with Bearer Tokens\n- ✉️ Email Verification\n- 🔄 JWT Token Refresh with Secure Blacklist Support\n- 👤 User Profile Management\n- 🏪 Seller Upgrade\n- 📱 Multi-device Session Management\n- 🔒 JWT Blacklist for immediate token revocation\n- 🛡️ Enterprise-grade Security\n\n## Authentication Flow\n\n1. **Register**: POST `/api/auth/register` - Create new account\n2. **Verify Email**: GET `/api/auth/verify-email?token={token}` - Verify email from link\n3. **Login Step 1**: POST `/api/auth/login` - Send OTP to email\n4. **Login Step 2**: POST `/api/auth/verify-otp` - Verify OTP and get JWT tokens\n5. **Use Access Token**: Include in `Authorization: Bearer {token}` header for all authenticated requests\n6. **Refresh Token**: POST `/api/auth/refresh` - Get new access token (uses Bearer token)\n7. **Logout**: POST `/api/auth/logout` - Blacklist JWT and invalidate session (requires JWT)\n\n## Security Features\n\n- Passwords hashed with Argon2\n- JWT tokens with JTI (JWT ID) for secure blacklist support (15 min access, 7 days refresh)\n- Memory-based refresh token storage (no cookies)\n- Secure database function blacklist validation\n- JWT blacklist database for immediate token invalidation\n- Rate limiting per role (Redis-based)\n- Session tracking with device info\n- Security headers and CORS protection\n- Audit logging for security events\n",
     ),
     paths(
         // Auth endpoints
@@ -66,6 +69,7 @@ impl Modify for SecurityAddon {
             crate::handlers::auth::LoginRequestBody,
             crate::handlers::auth::VerifyOtpRequestBody,
             crate::handlers::auth::ResendOtpRequest,
+            crate::handlers::auth::LogoutRequest,
             crate::handlers::auth::MessageResponse,
             crate::handlers::auth::LoginStep1Response,
             crate::handlers::auth::LoginStep2Response,
@@ -92,72 +96,103 @@ impl Modify for SecurityAddon {
 )]
 struct ApiDoc;
 
-/// Create the main application router with all routes
-pub fn create_router(state: AppState) -> Router {
+/// Create public routes
+fn create_public_routes(state: AppState) -> Router {
     Router::new()
-        // Health check endpoint
-        .route("/health", get(health_check))
-        // Auth routes (public - tidak perlu JWT)
-        .route("/api/auth/register", post(auth::register_handler))
-        .route("/api/auth/verify-email", get(auth::verify_email_handler))
-        .route("/api/auth/resend-verification", post(auth::resend_verification_handler))
-        .route("/api/auth/login", post(auth::login_step1_handler))
-        .route("/api/auth/verify-otp", post(auth::login_step2_handler))
-        .route("/api/auth/resend-otp", post(auth::resend_otp_handler))
-        .route("/api/auth/refresh", post(auth::refresh_token_handler))
-        .route("/api/auth/logout", post(auth::logout_handler))
-        // OTP status check (protected - perlu JWT)
-        .route("/api/auth/otp-status", get(otp::check_otp_status_handler))
-        // Session routes (protected - perlu JWT middleware)
-        .route("/api/auth/sessions", get(session::get_sessions_handler))
-        .route("/api/auth/sessions/{id}", delete(session::invalidate_session_handler))
-        .route("/api/auth/sessions/invalidate-all", post(session::invalidate_all_sessions_handler))
-        // User routes (protected - perlu JWT middleware)
-        .route("/api/users/me", get(user::get_profile_handler))
-        .route("/api/users/me", put(user::update_profile_handler))
-        .route("/api/users/me/upgrade-seller", post(user::upgrade_to_seller_handler))
-        // Swagger UI documentation
-        .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
-        // Share application state with all routes
-        .with_state(state)
+        // Health check
+        .route("/health", axum::routing::get(health_check))
+
+        // Auth endpoints - Public access (no JWT required)
+        .route("/api/auth/register", axum::routing::post(crate::handlers::auth::register_handler))
+        .route("/api/auth/verify-email", axum::routing::get(crate::handlers::auth::verify_email_handler))
+        .route("/api/auth/resend-verification", axum::routing::post(crate::handlers::auth::resend_verification_handler))
+        .route("/api/auth/login", axum::routing::post(crate::handlers::auth::login_step1_handler))
+        .route("/api/auth/verify-otp", axum::routing::post(crate::handlers::auth::login_step2_handler))
+        .route("/api/auth/resend-otp", axum::routing::post(crate::handlers::auth::resend_otp_handler))
+        
+
+        .with_state(state.clone())
+}
+
+/// Create JWT-protected routes
+fn create_jwt_protected_routes(state: AppState) -> Router {
+    Router::new()
+        // Refresh token - JWT protection 
+        .route("/api/auth/refresh", axum::routing::post(crate::handlers::auth::refresh_token_handler))
+
+        // Logout - JWT protection only
+        .route("/api/auth/logout", axum::routing::post(crate::handlers::auth::logout_handler))
+
+        // OTP status check - JWT protection only
+        .route("/api/auth/otp-status", axum::routing::get(crate::handlers::otp::check_otp_status_handler))
+
+        // Session endpoints - JWT protection only
+        .route("/api/auth/sessions", axum::routing::get(crate::handlers::session::get_sessions_handler))
+        .route("/api/auth/sessions/{id}", axum::routing::delete(crate::handlers::session::invalidate_session_handler))
+        .route("/api/auth/sessions/invalidate-all", axum::routing::post(crate::handlers::session::invalidate_all_sessions_handler))
+
+        // User endpoints - JWT protection only
+        .route("/api/users/me", axum::routing::get(crate::handlers::user::get_profile_handler))
+        .route("/api/users/me", axum::routing::put(crate::handlers::user::update_profile_handler))
+        .route("/api/users/me/upgrade-seller", axum::routing::post(crate::handlers::user::upgrade_to_seller_handler))
+
+        .with_state(state.clone())
+        // Apply JWT middleware untuk protected routes
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::middleware::auth_extractor::jwt_auth_extractor_middleware
+        ))
 }
 
 /// Health check endpoint
-///
-/// Returns the health status of the service including database and redis connectivity
 async fn health_check(
     axum::extract::State(state): axum::extract::State<AppState>,
-) -> AppResult<Json<HealthCheckResponse>> {
+) -> axum::response::Json<serde_json::Value> {
     let health = state.health_check().await;
 
-    let response = HealthCheckResponse {
-        status: health.overall.clone(),
-        service: "auth-service".to_string(),
-        version: env!("CARGO_PKG_VERSION").to_string(),
-        database: health.database.clone(),
-        redis: health.redis.clone(),
-    };
-
-    Ok(Json(response))
+    axum::response::Json(serde_json::json!({
+        "status": health.overall,
+        "service": "auth-service",
+        "version": env!("CARGO_PKG_VERSION"),
+        "database": health.database,
+        "redis": health.redis
+    }))
 }
+
+/// Create the main application router
+pub fn create_router(state: AppState) -> Router {
+    // Base security layers
+    Router::new()
+        // Security headers first
+        .layer(middleware::from_fn(security_headers_middleware))
+        // CORS configuration
+        .layer(configure_cors())
+        // Rate limiting with proper state
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth_rate_limit_middleware
+        ))
+        // Merge public routes
+        .merge(create_public_routes(state.clone()))
+        // Merge protected routes
+        .merge(create_jwt_protected_routes(state))
+        // Add Swagger UI documentation
+        .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
+}
+
+
 
 /// Health check response
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 struct HealthCheckResponse {
-    /// Overall status
     #[schema(example = "healthy")]
     status: String,
-    /// Service name
     #[schema(example = "auth-service")]
     service: String,
-    /// Service version
     #[schema(example = "0.1.0")]
     version: String,
-    /// Database connection status
     #[schema(example = "healthy")]
     database: String,
-    /// Redis connection status
     #[schema(example = "healthy")]
     redis: String,
 }
-

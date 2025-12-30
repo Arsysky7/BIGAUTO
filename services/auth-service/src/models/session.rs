@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::{PgPool, Row, FromRow};
+use sqlx::{PgPool, FromRow};
 
 // Represent user session dari database
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -161,25 +161,7 @@ impl UserSession {
         Ok(())
     }
 
-    // Invalidate session by refresh token
-    pub async fn invalidate_by_token(
-        pool: &PgPool,
-        refresh_token: &str,
-    ) -> Result<(), sqlx::Error> {
-        sqlx::query(
-            r#"
-            UPDATE user_sessions
-            SET is_active = false,
-                updated_at = NOW()
-            WHERE refresh_token = $1
-            "#
-        )
-        .bind(refresh_token)
-        .execute(pool)
-        .await?;
-        Ok(())
-    }
-
+    
     // Invalidate semua sessions untuk user (logout dari semua device)
     pub async fn invalidate_all_by_user(pool: &PgPool, user_id: i32) -> Result<(), sqlx::Error> {
         sqlx::query(

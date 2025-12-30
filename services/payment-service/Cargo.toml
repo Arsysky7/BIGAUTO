@@ -1,0 +1,70 @@
+[package]
+name = "payment-service"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Shared Library
+shared = { path = "../../shared" }
+
+# Web Framework
+axum = { workspace = true }
+axum-extra = { workspace = true }
+tokio = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true, features = ["compression-gzip", "fs", "timeout"] }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Database
+sqlx = { workspace = true, features = ["bigdecimal", "runtime-tokio", "postgres", "chrono"] }
+
+# BigDecimal untuk NUMERIC types
+bigdecimal = { workspace = true }
+
+# Date & Time
+chrono = { workspace = true }
+
+# CSRF Protection
+lazy_static = "1.4"
+
+# Environment Variables
+dotenvy = { workspace = true }
+
+# Logging & Tracing
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# OpenAPI Documentation
+utoipa = { workspace = true }
+utoipa-swagger-ui = { workspace = true }
+
+# Error Handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# HTTP Client (untuk Midtrans API)
+reqwest = { workspace = true, features = ["json"] }
+
+# UUID untuk ID generation
+uuid = { workspace = true }
+
+# Random number generation
+rand = { workspace = true }
+
+# Cryptography untuk signature validation
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+base64 = "0.22"
+
+# Async utilities
+futures-util = "0.3"
+
+# Authentication dependencies
+jsonwebtoken = { workspace = true }
+
+# Redis untuk Rate Limiting
+redis = { workspace = true }

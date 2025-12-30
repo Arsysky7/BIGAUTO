@@ -43,7 +43,7 @@ pub async fn list_vehicles(
 
     let data: Vec<VehicleResponse> = vehicles
         .into_iter()
-        .map(|v| map_to_response_from_with_seller(v))
+        .map(map_to_response_from_with_seller)
         .collect();
 
     let total_pages = (total as f64 / limit as f64).ceil() as i64;

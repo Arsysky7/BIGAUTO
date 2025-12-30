@@ -3,7 +3,7 @@ use argon2::{
     Argon2, Params, Version,
 };
 
-// Hash password menggunakan Argon2id dengan parameter OWASP recommended untuk production
+// Hash password menggunakan Argon2id dengan parameter OWASP 
 pub fn hash_password(password: &str) -> Result<String, argon2::password_hash::Error> {
     let salt = SaltString::generate(&mut OsRng);
 

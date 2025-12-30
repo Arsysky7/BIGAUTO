@@ -1,8 +1,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::{PgPool, Row, FromRow};
+use sqlx::{PgPool, Row};
 
-// Represent user row dari database
+// Represent user row dari database 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct User {
     pub id: i32,
@@ -25,8 +25,8 @@ pub struct User {
     pub otp_request_count: Option<i32>,
     pub otp_blocked_until: Option<DateTime<Utc>>,
     pub last_otp_request_at: Option<DateTime<Utc>>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+    pub created_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<DateTime<Utc>>,
 }
 
 
@@ -51,61 +51,85 @@ pub struct UpdateUserProfile {
     pub profile_photo: Option<String>,
 }
 
+// Response model dengan guaranteed timestamps untuk API
+
 impl User {
-    // Cari user berdasarkan email
+    // Cari user berdasarkan email 
     pub async fn find_by_email(pool: &PgPool, email: &str) -> Result<Option<Self>, sqlx::Error> {
-        let result = sqlx::query(
-            "SELECT id, email, password_hash, name, phone, is_seller, address, city, profile_photo, business_name, email_verified, email_verified_at, last_login_at, login_count, is_active, deactivated_at, otp_request_count, otp_blocked_until, last_otp_request_at, created_at, updated_at FROM users WHERE email = $1 AND is_active = true"
-        )
-        .bind(email)
-        .fetch_optional(pool)
-        .await?;
+        // Validasi input untuk mencegah SQL injection
+        let normalized_email = email.trim().to_lowercase();
 
-        match result {
-            Some(row) => {
-                let user = User::from_row(&row)?;
-                Ok(Some(user))
-            }
-            None => Ok(None)
-        }
+        sqlx::query_as!(
+            Self,
+            r#"
+            SELECT id, email, password_hash, name, phone, is_seller, address, city,
+                   profile_photo, business_name, email_verified, email_verified_at,
+                   last_login_at, login_count, is_active, deactivated_at,
+                   otp_request_count, otp_blocked_until, last_otp_request_at,
+                   created_at, updated_at
+            FROM users
+            WHERE email = $1 AND is_active = true
+            "#,
+            normalized_email
+        )
+        .fetch_optional(pool)
+        .await
     }
 
-    // Cari user berdasarkan id
+    // Ambil data user berdasarkan ID untuk operasi profil dan validasi
     pub async fn find_by_id(pool: &PgPool, user_id: i32) -> Result<Option<Self>, sqlx::Error> {
-        let result = sqlx::query(
-            "SELECT id, email, password_hash, name, phone, is_seller, address, city, profile_photo, business_name, email_verified, email_verified_at, last_login_at, login_count, is_active, deactivated_at, otp_request_count, otp_blocked_until, last_otp_request_at, created_at, updated_at FROM users WHERE id = $1 AND is_active = true"
-        )
-        .bind(user_id)
-        .fetch_optional(pool)
-        .await?;
-
-        match result {
-            Some(row) => {
-                let user = User::from_row(&row)?;
-                Ok(Some(user))
-            }
-            None => Ok(None)
+        // Validasi input untuk security
+        if user_id <= 0 {
+            return Ok(None);
         }
-    }
 
-    // Create user baru
-    pub async fn create(pool: &PgPool, new_user: NewUser) -> Result<Self, sqlx::Error> {
-        let result = sqlx::query(
-            "INSERT INTO users (email, password_hash, name, phone, address, city) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, email, password_hash, name, phone, is_seller, address, city, profile_photo, business_name, email_verified, email_verified_at, last_login_at, login_count, is_active, deactivated_at, otp_request_count, otp_blocked_until, last_otp_request_at, created_at, updated_at"
+        sqlx::query_as!(
+            Self,
+            r#"
+            SELECT id, email, password_hash, name, phone, is_seller, address, city,
+                   profile_photo, business_name, email_verified, email_verified_at,
+                   last_login_at, login_count, is_active, deactivated_at,
+                   otp_request_count, otp_blocked_until, last_otp_request_at,
+                   created_at, updated_at
+            FROM users
+            WHERE id = $1 AND is_active = true
+            "#,
+            user_id
         )
-        .bind(new_user.email)
-        .bind(new_user.password_hash)
-        .bind(new_user.name)
-        .bind(new_user.phone)
-        .bind(new_user.address)
-        .bind(new_user.city)
-        .fetch_one(pool)
-        .await?;
-
-        Ok(User::from_row(&result)?)
+        .fetch_optional(pool)
+        .await
     }
 
-    // Verifikasi email user
+    // Buat user baru dengan validasi dan normalisasi data
+    pub async fn create(pool: &PgPool, new_user: NewUser) -> Result<Self, sqlx::Error> {
+        // Normalisasi input untuk data consistency
+        let normalized_email = new_user.email.trim().to_lowercase();
+        let normalized_name = new_user.name.trim().to_string();
+        let normalized_phone = new_user.phone.trim().to_string();
+
+        sqlx::query_as!(
+            Self,
+            r#"
+            INSERT INTO users (email, password_hash, name, phone, address, city)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING id, email, password_hash, name, phone, is_seller, address, city,
+                   profile_photo, business_name, email_verified, email_verified_at,
+                   last_login_at, login_count, is_active, deactivated_at,
+                   otp_request_count, otp_blocked_until, last_otp_request_at,
+                   created_at, updated_at
+            "#,
+            normalized_email,
+            new_user.password_hash,
+            normalized_name,
+            normalized_phone,
+            new_user.address,
+            new_user.city
+        )
+        .fetch_one(pool)
+        .await
+    }
+
+    // Tandai email user sebagai terverifikasi
     pub async fn verify_email(pool: &PgPool, user_id: i32) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"
@@ -122,7 +146,7 @@ impl User {
         Ok(())
     }
 
-    // Update login tracking
+    // Perbarui data login user setelah successful login
     pub async fn update_login_tracking(pool: &PgPool, user_id: i32) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"
@@ -155,9 +179,6 @@ impl User {
         .await?;
         Ok(())
     }
-
-    // NOTE: reset_otp_request_count() dihapus karena tidak ada di REQUIREMENT.MD
-    // OTP rate limiting di-handle oleh Redis, bukan manual reset
 
     // Block user dari request OTP
     pub async fn block_otp_requests(
@@ -248,6 +269,28 @@ impl User {
         Ok(())
     }
 
-    // NOTE: deactivate() dihapus karena tidak ada fitur deactivate di REQUIREMENT.MD
-    // User hanya bisa Customer atau Seller, tidak ada Admin yang bisa deactivate
+    // ===== USER ROLE HELPER FUNCTIONS  =====
+
+    /// Check if user is customer 
+    pub fn is_customer(&self) -> bool {
+        // Semua user adalah customer 
+        true
+    }
+
+    /// Check if user is seller role
+    pub fn is_seller_role(&self) -> bool {
+        self.is_seller.unwrap_or(false)
+    }
+
+    
+    /// Get user role untuk JWT claims
+    pub fn get_jwt_role(&self) -> String {
+        match (self.is_customer(), self.is_seller_role()) {
+            (true, true) => "hybrid".to_string(),
+            (true, false) => "customer".to_string(),
+            (false, true) => "seller".to_string(),
+            (false, false) => "customer".to_string(),
+        }
+    }
+
 }

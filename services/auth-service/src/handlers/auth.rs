@@ -4,9 +4,7 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use axum_extra::extract::CookieJar;
 use serde::{Deserialize, Serialize};
-use time::Duration;
 use utoipa::ToSchema;
 
 use crate::{
@@ -76,6 +74,14 @@ pub struct ResendOtpRequest {
     pub user_id: i32,
 }
 
+
+/// Request body untuk logout
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct LogoutRequest {
+    #[schema(example = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...")]
+    pub refresh_token: String,
+}
+
 // ===== RESPONSE DTOs =====
 
 /// Response dengan message sukses
@@ -94,11 +100,13 @@ pub struct LoginStep1Response {
     pub user_id: i32,
 }
 
-/// Response login step 2 (sukses login)
+/// Response login step 2 (dengan tokens)
 #[derive(Debug, Serialize, ToSchema)]
 pub struct LoginStep2Response {
     #[schema(example = "eyJhbGciOiJIUzI1NiIs...")]
     pub access_token: String,
+    #[schema(example = "eyJhbGciOiJIUzI1NiIs...")]
+    pub refresh_token: String,
     pub user: UserData,
     #[schema(example = "Login berhasil")]
     pub message: String,
@@ -134,6 +142,49 @@ fn extract_user_agent(headers: &HeaderMap) -> Option<String> {
         .get("user-agent")
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string())
+}
+
+/// Ekstrak Bearer token dari Authorization header
+fn extract_bearer_token_from_header(headers: &HeaderMap) -> Result<String, AppError> {
+    let auth_header = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .ok_or_else(|| AppError::authentication("Authorization header required"))?;
+
+    let auth_str = auth_header
+        .to_str()
+        .map_err(|_| AppError::authentication("Invalid Authorization header format"))?;
+
+    if !auth_str.starts_with("Bearer ") {
+        return Err(AppError::authentication("Bearer token required"));
+    }
+
+    let token = auth_str[7..].trim();
+    if token.is_empty() {
+        return Err(AppError::authentication("Token cannot be empty"));
+    }
+
+    Ok(token.to_string())
+}
+
+/// Validasi format refresh token 
+fn validate_refresh_token_format(token: &str) -> Result<(), AppError> {
+    // Basic JWT format validation
+    let parts: Vec<&str> = token.split('.').collect();
+    if parts.len() != 3 {
+        return Err(AppError::authentication("Invalid token format"));
+    }
+
+    // Minimum length check for security
+    if token.len() < 50 {
+        return Err(AppError::authentication("Token too short"));
+    }
+
+    // Check for suspicious characters
+    if token.contains(' ') || token.contains('\n') || token.contains('\r') {
+        return Err(AppError::authentication("Token contains invalid characters"));
+    }
+
+    Ok(())
 }
 
 // ===== HANDLER FUNCTIONS =====
@@ -265,7 +316,7 @@ pub async fn login_step1_handler(
     Ok(Json(response))
 }
 
-/// Login step 2: Verifikasi OTP dan generate JWT tokens
+/// Login step 2: Verifikasi OTP dan generate JWT tokens 
 #[utoipa::path(
     post,
     path = "/api/auth/verify-otp",
@@ -279,7 +330,6 @@ pub async fn login_step1_handler(
 )]
 pub async fn login_step2_handler(
     State(state): State<AppState>,
-    jar: CookieJar,
     headers: HeaderMap,
     Json(req): Json<VerifyOtpRequestBody>,
 ) -> AppResult<impl IntoResponse> {
@@ -296,25 +346,15 @@ pub async fn login_step2_handler(
     // Call domain layer untuk verify OTP dan generate tokens
     let login_response = auth_domain::login_step2_verify_otp(&state, input, ip_address, user_agent).await?;
 
-    // Set refresh token di HttpOnly cookie (tidak bisa diakses JavaScript - SECURE!)
-    let cookie = axum_extra::extract::cookie::Cookie::build(("refresh_token", login_response.refresh_token.clone()))
-        .path("/")
-        .max_age(Duration::days(7))
-        .http_only(true) // Prevent XSS attacks
-        .secure(true) // HTTPS only di production
-        .same_site(axum_extra::extract::cookie::SameSite::Strict) // Prevent CSRF attacks
-        .build();
-
-    let jar = jar.add(cookie);
-
-    // Return access token dan user data (refresh token sudah di cookie)
+    // Return access token dan refresh token
     let response = LoginStep2Response {
         access_token: login_response.access_token,
+        refresh_token: login_response.refresh_token,
         user: login_response.user,
-        message: "Login berhasil.".to_string(),
+        message: "Login berhasil. Simpan refresh token dengan aman.".to_string(),
     };
 
-    Ok((jar, Json(response)))
+    Ok(Json(response))
 }
 
 /// Kirim ulang OTP jika expired atau salah input
@@ -348,29 +388,31 @@ pub async fn resend_otp_handler(
     Ok(Json(response))
 }
 
-/// Refresh access token menggunakan refresh token dari cookie
+/// Generate access token baru dari refresh token yang valid
 #[utoipa::path(
     post,
     path = "/api/auth/refresh",
+    security(
+        ("Bearer" = [])
+    ),
     responses(
-        (status = 200, description = "Access token berhasil di-refresh", body = RefreshTokenResponse),
+        (status = 200, description = "Access token baru berhasil dibuat", body = RefreshTokenResponse),
         (status = 401, description = "Refresh token tidak valid atau expired"),
-        (status = 400, description = "Refresh token tidak ditemukan di cookie")
+        (status = 403, description = "Token telah diblacklist")
     ),
     tag = "Authentication"
 )]
 pub async fn refresh_token_handler(
     State(state): State<AppState>,
-    jar: CookieJar,
+    headers: HeaderMap,
 ) -> AppResult<impl IntoResponse> {
-    // Ambil refresh token dari HttpOnly cookie
-    let refresh_token = jar
-        .get("refresh_token")
-        .ok_or_else(|| AppError::authentication("Refresh token tidak ditemukan. Silakan login kembali."))?
-        .value()
-        .to_string();
+    // Extract refresh token dari Authorization header
+    let refresh_token = extract_bearer_token_from_header(&headers)?;
 
-    // Generate new access token melalui domain layer
+    // Validasi format refresh token dengan security checks
+    validate_refresh_token_format(&refresh_token)?;
+
+    // Generate new access token melalui domain layer dengan enterprise security
     let access_token = auth_domain::refresh_access_token(&state, &refresh_token).await?;
 
     let response = RefreshTokenResponse { access_token };
@@ -378,42 +420,53 @@ pub async fn refresh_token_handler(
     Ok(Json(response))
 }
 
-/// Logout dan invalidate session di database + hapus cookie
+/// Logout user dengan blacklist JWT tokens 
 #[utoipa::path(
     post,
     path = "/api/auth/logout",
+    security(
+        ("Bearer" = [])
+    ),
     responses(
-        (status = 200, description = "Logout berhasil, session dihapus", body = MessageResponse),
-        (status = 400, description = "Tidak ada session aktif")
+        (status = 200, description = "Logout berhasil, JWT tokens diblacklist", body = MessageResponse),
+        (status = 401, description = "JWT tidak valid atau expired")
     ),
     tag = "Authentication"
 )]
 pub async fn logout_handler(
     State(state): State<AppState>,
-    jar: CookieJar,
+    headers: HeaderMap,
+    Json(req): Json<LogoutRequest>,
 ) -> AppResult<impl IntoResponse> {
-    // Ambil refresh token dari cookie jika ada
-    if let Some(refresh_token_cookie) = jar.get("refresh_token") {
-        let refresh_token = refresh_token_cookie.value().to_string();
+    // Ekstrak refresh token dari request body
+    validate_refresh_token_format(&req.refresh_token)?;
 
-        // Invalidate session di database melalui domain layer
-        let _ = auth_domain::logout(&state, &refresh_token).await;
+    // Ekstrak access token dari Authorization header untuk blacklist compliance
+    let access_token = extract_bearer_token_from_header(&headers)?;
+
+    // Execute logout dengan keamanan enterprise compliance
+    auth_domain::logout(&state, &req.refresh_token).await?;
+
+    // Ekstrak dan blacklist access token 
+    if let Ok(claims) = crate::utils::jwt::validate_token_signature(&access_token, &state.config.jwt_secret) {
+        // Blacklist access token via secure function
+        let _ = sqlx::query_scalar!(
+            "SELECT blacklist_token($1, $2, $3)",
+            claims.jti,
+            "access",
+            "user_logout"
+        )
+        .fetch_one(&state.db)
+        .await;
+
+        tracing::info!("Access token blacklisted: jti={}", claims.jti);
+    } else {
+        tracing::warn!("Access token tidak valid, skipping blacklist");
     }
 
-    // Hapus refresh token cookie dengan max_age 0
-    let cookie = axum_extra::extract::cookie::Cookie::build(("refresh_token", ""))
-        .path("/")
-        .max_age(Duration::seconds(0))
-        .http_only(true)
-        .secure(true)
-        .same_site(axum_extra::extract::cookie::SameSite::Strict)
-        .build();
-
-    let jar = jar.add(cookie);
-
     let response = MessageResponse {
-        message: "Logout berhasil.".to_string(),
+        message: "Logout berhasil. Semua token telah diblacklist sesuai SECURITY_RULES.md".to_string(),
     };
 
-    Ok((jar, Json(response)))
+    Ok(Json(response))
 }

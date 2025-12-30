@@ -101,9 +101,15 @@ pub async fn add_favorite(
         }
     }
 
-    // Cek apakah vehicle exist
-    get_vehicle_info(payload.vehicle_id).await
+    // Cek apakah vehicle exist dan valid status
+    let vehicle_info = get_vehicle_info(payload.vehicle_id).await
         .map_err(|_| AppError::not_found("Vehicle tidak ditemukan"))?;
+
+    // Validasi vehicle status - tidak boleh favorite vehicle yang sudah sold
+    let status = extract_string(&vehicle_info, "status");
+    if status == "sold" {
+        return Err(AppError::bad_request("Vehicle sudah terjual tidak bisa difavoritkan"));
+    }
 
     // Insert ke database
     let favorite = insert_favorite(&pool, auth.user_id, payload.vehicle_id).await?;
