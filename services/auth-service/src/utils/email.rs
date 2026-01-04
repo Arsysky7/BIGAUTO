@@ -28,7 +28,7 @@ pub async fn send_verification_email(
 ) -> Result<(), crate::error::AppError> {
     let verification_link = format!(
         "{}/api/auth/verify-email?token={}",
-        env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:3000".to_string()),
+        env::var("FRONTEND_URL").expect("FRONTEND_URL environment variable harus diset"),
         verification_token
     );
 
