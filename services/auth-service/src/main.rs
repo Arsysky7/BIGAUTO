@@ -81,8 +81,12 @@ async fn main() -> AppResult<()> {
     // Create application router with all routes
     let app = create_app(state);
 
-    // Create server address
-    let addr = SocketAddr::from(([0, 0, 0, 0], config.server_port));
+    // Create server address dari config
+    let addr = format!("{}:{}", config.server_host, config.server_port);
+    let addr = addr.parse::<SocketAddr>().unwrap_or_else(|_| {
+        SocketAddr::from(([0, 0, 0, 0], config.server_port))
+    });
+
     tracing::info!("🎧 Server listening on {}", addr);
     tracing::info!("📚 Swagger UI available at http://localhost:{}/swagger-ui", config.server_port);
     tracing::info!("📖 Health check available at http://localhost:{}/health", config.server_port);

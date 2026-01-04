@@ -18,6 +18,7 @@ pub struct AppConfig {
     pub jwt_secret: String,
     pub jwt_access_expiry: i64,
     pub jwt_refresh_expiry: i64,
+    pub server_host: String,
     pub server_port: u16,
     pub environment: String,
     pub email_config: EmailConfig,
@@ -26,7 +27,6 @@ pub struct AppConfig {
 impl AppConfig {
     // Load semua konfigurasi dari env file dengan validasi
     pub fn from_env() -> Result<Self, String> {
-        // Note: dotenv() already called in main.rs before this function
         let database_url = env::var("DATABASE_URL")
             .map_err(|_| "DATABASE_URL harus diset di environment")?;
 
@@ -51,6 +51,9 @@ impl AppConfig {
             .and_then(|s| s.parse().ok())
             .unwrap_or(604800);
 
+        let server_host = env::var("AUTH_SERVICE_HOST")
+            .unwrap_or_else(|_| "0.0.0.0".to_string());
+
         let server_port = env::var("AUTH_SERVICE_PORT")
             .ok()
             .and_then(|s| s.parse().ok())
@@ -67,6 +70,7 @@ impl AppConfig {
             jwt_secret,
             jwt_access_expiry,
             jwt_refresh_expiry,
+            server_host,
             server_port,
             environment,
             email_config,
