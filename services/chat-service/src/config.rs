@@ -41,7 +41,6 @@ pub struct AppConfig {
     pub user_service_url: String,
     pub vehicle_service_url: String,
     pub booking_service_url: String,
-    pub frontend_url: String,
 }
 
 impl AppConfig {
@@ -106,9 +105,6 @@ impl AppConfig {
         let booking_service_url = env::var("BOOKING_SERVICE_URL")
             .expect("BOOKING_SERVICE_URL harus diset di environment");
 
-        let frontend_url = env::var("FRONTEND_URL")
-            .expect("FRONTEND_URL environment variable HARUS diisi di .env file");
-
         Ok(AppConfig {
             database_url,
             server_host,
@@ -126,7 +122,6 @@ impl AppConfig {
             user_service_url,
             vehicle_service_url,
             booking_service_url,
-            frontend_url,
         })
     }
 
