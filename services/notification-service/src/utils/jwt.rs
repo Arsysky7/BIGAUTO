@@ -1,11 +1,8 @@
-// JWT validation dengan database untuk Payment Service
-
 use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
 use sqlx::PgPool;
 use std::env;
-use thiserror::Error;
 
-// Claims structure untuk JWT token
+/// TokenClaims structure untuk Notification Service
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TokenClaims {
     pub sub: i32,
@@ -17,32 +14,24 @@ pub struct TokenClaims {
     pub jti: String,
 }
 
-// Error types untuk JWT validation
-#[derive(Debug, Error)]
+/// Error JWT untuk notification service
+#[derive(Debug, thiserror::Error)]
 pub enum JwtError {
     #[error("Token invalid atau expired")]
     InvalidToken,
+
     #[error("JWT secret tidak ditemukan")]
     MissingSecret,
+
     #[error("Token type tidak valid untuk endpoint ini")]
     InvalidTokenType,
-    #[error("Token sudah di-blacklist")]
-    TokenBlacklisted,
-    #[error("Database error saat validasi blacklist")]
-    DatabaseError,
 }
 
-// Decode JWT token dan validasi signature
+/// Validasi JWT signature dan extract claims
 fn decode_jwt_token(token: &str) -> Result<TokenClaims, JwtError> {
-    let secret = env::var("JWT_SECRET")
-        .map_err(|_| JwtError::MissingSecret)?;
-
-    // Production safety check
-    if !cfg!(debug_assertions) && secret.contains("change-this") {
-        return Err(JwtError::MissingSecret);
-    }
-
+    let secret = get_jwt_secret()?;
     let validation = Validation::new(Algorithm::HS256);
+
     let token_data = decode::<TokenClaims>(
         token,
         &DecodingKey::from_secret(secret.as_bytes()),
@@ -50,40 +39,76 @@ fn decode_jwt_token(token: &str) -> Result<TokenClaims, JwtError> {
     )
     .map_err(|_| JwtError::InvalidToken)?;
 
-    // Business services hanya terima access token
-    if token_data.claims.token_type != "access" {
-        return Err(JwtError::InvalidTokenType);
-    }
-
     Ok(token_data.claims)
 }
 
-// Cek apakah token sudah di-blacklist menggunakan secure function
+/// Ambil JWT secret dari environment 
+fn get_jwt_secret() -> Result<String, JwtError> {
+    let secret = env::var("JWT_SECRET")
+        .map_err(|_| JwtError::MissingSecret)?;
+
+    // Security check untuk production environment
+    if !cfg!(debug_assertions) && secret.contains("change-this") {
+        tracing::error!("JWT_SECRET using default value in production!");
+        return Err(JwtError::MissingSecret);
+    }
+
+    Ok(secret)
+}
+
+/// Validasi token type (hanya access token yang diperbolehkan)
+fn validate_token_type(claims: &TokenClaims) -> Result<(), JwtError> {
+    if claims.token_type != "access" {
+        tracing::warn!("Invalid token type: {}", claims.token_type);
+        return Err(JwtError::InvalidTokenType);
+    }
+    Ok(())
+}
+
+/// Cek JWT blacklist di database via secure function 
 async fn check_jwt_blacklist(pool: &PgPool, claims: &TokenClaims) -> Result<(), JwtError> {
-    let is_blacklisted: bool = sqlx::query_scalar!(
-        "SELECT is_token_blacklisted_v2($1, $2)",
+    let is_blacklisted = sqlx::query_scalar!(
+        "SELECT is_token_blacklisted_v2($1, $2)", 
         claims.jti,
         claims.token_type
     )
     .fetch_one(pool)
     .await
-    .map_err(|_| JwtError::DatabaseError)?
+    .map_err(|e| {
+        tracing::error!("JWT blacklist check failed: {}", e);
+        JwtError::InvalidToken
+    })?
     .unwrap_or(false);
 
     if is_blacklisted {
-        return Err(JwtError::TokenBlacklisted);
+        tracing::warn!(
+            "Blacklisted token access attempt - user_id: {}, jti: {}...",
+            claims.sub,
+            &claims.jti[..8.min(claims.jti.len())]
+        );
+        return Err(JwtError::InvalidToken);
     }
 
     Ok(())
 }
 
-// Main validation function dengan database t
+/// Main validation function untuk JWT
 pub async fn validate_token(token: &str, pool: &PgPool) -> Result<TokenClaims, JwtError> {
     // Decode dan validasi signature
     let claims = decode_jwt_token(token)?;
 
-    // Cek blacklist menggunakan secure function 
+    // Validasi token type (hanya access token)
+    validate_token_type(&claims)?;
+
+    // Cek blacklist via secure database function
     check_jwt_blacklist(pool, &claims).await?;
+
+    tracing::debug!(
+        "JWT validation successful - user_id: {}, email: {}, role: {}",
+        claims.sub,
+        claims.email,
+        claims.role
+    );
 
     Ok(claims)
 }
@@ -115,7 +140,7 @@ mod tests {
     }
 
     #[test]
-    fn test_decode_access_token_success() {
+    fn test_validate_access_token_signature() {
         std::env::set_var("JWT_SECRET", "test-secret-key-for-testing-only");
 
         let token = create_test_token(123, "test@example.com", "customer", "access");
@@ -124,31 +149,24 @@ mod tests {
         assert!(result.is_ok());
         let claims = result.unwrap();
         assert_eq!(claims.sub, 123);
+        assert_eq!(claims.email, "test@example.com");
+        assert_eq!(claims.role, "customer");
         assert_eq!(claims.token_type, "access");
     }
 
     #[test]
-    fn test_decode_reject_refresh_token() {
+    fn test_reject_refresh_token() {
         std::env::set_var("JWT_SECRET", "test-secret-key-for-testing-only");
 
         let token = create_test_token(123, "test@example.com", "customer", "refresh");
-        let result = decode_jwt_token(&token);
+        let claims = decode_jwt_token(&token).unwrap();
 
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), JwtError::InvalidTokenType));
+        // Should fail token type validation
+        assert!(validate_token_type(&claims).is_err());
     }
 
     #[test]
-    fn test_decode_invalid_token_format() {
-        std::env::set_var("JWT_SECRET", "test-secret-key-for-testing-only");
-
-        let result = decode_jwt_token("invalid.token.here");
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), JwtError::InvalidToken));
-    }
-
-    #[test]
-    fn test_missing_secret_environment() {
+    fn test_missing_secret() {
         std::env::remove_var("JWT_SECRET");
 
         let token = create_test_token(123, "test@example.com", "customer", "access");

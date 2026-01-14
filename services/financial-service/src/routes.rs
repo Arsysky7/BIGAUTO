@@ -1,7 +1,10 @@
+// Router configuration untuk Financial Service
 use axum::{
+    extract::State,
     http::{header, HeaderValue, Method},
-    routing::{get, post, put, delete},
-    Router, Json, extract::State,
+    Json,
+    Router,
+    routing::{get, post},
 };
 use sqlx::PgPool;
 use tower_http::cors::CorsLayer;
@@ -10,9 +13,13 @@ use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa_swagger_ui::SwaggerUi;
 use utoipa_redoc::{Redoc, Servable};
 use crate::{
-    handlers::{profile, favorite, rating},
     config::{AppState, HealthStatus, check_db_health},
-    middleware::{auth::auth_middleware, rate_limit::rate_limit_middleware},
+    handlers::{
+        balance::{get_balance, __path_get_balance},
+        transactions::{get_transactions, __path_get_transactions},
+        withdrawals::{create_withdrawal, __path_create_withdrawal, list_withdrawals, __path_list_withdrawals, get_withdrawal_by_id, __path_get_withdrawal_by_id},
+    },
+    middleware::{auth_middleware, rate_limit_middleware},
 };
 
 // Security scheme untuk Bearer authentication
@@ -38,60 +45,37 @@ impl Modify for SecurityAddon {
 #[derive(OpenApi)]
 #[openapi(
     info(
-        title = "Big Auto - User Service API",
+        title = "Big Auto - Financial Service API",
         version = "0.1.0",
-        description = "User Profile, Favorites, and Ratings Service\n\n## Features\n\n- 👤 User Profile Management\n- 🏪 Seller Upgrade\n- 📸 Profile Photo Upload (Cloudinary)\n- ❤️ Vehicle Favorites/Wishlist\n- ⭐ Seller Ratings & Reviews\n\n## Authentication\n\nAll endpoints require JWT token from auth-service.\nInclude token in `Authorization: Bearer {token}` header.\n",
+        description = "Financial Management Service\n\n## Features\n\n- 💰 Seller Balance Management\n- 💸 Withdrawal Requests\n- 📊 Transaction History\n- 💳 Commission Processing\n\n## Authentication\n\nAll endpoints require JWT token from auth-service.\nInclude token in `Authorization: Bearer {token}` header.\n",
     ),
     paths(
-        // Profile endpoints
-        profile::get_my_profile,
-        profile::get_user_profile,
-        profile::update_profile,
-        profile::upgrade_to_seller,
-        profile::upload_profile_photo,
-        // Favorite endpoints
-        favorite::get_favorites,
-        favorite::add_favorite,
-        favorite::remove_favorite,
-        favorite::check_favorite,
-        // Rating endpoints
-        rating::submit_review,
-        rating::get_seller_ratings,
-        rating::get_seller_rating_summary,
-        rating::get_my_seller_reviews,
+        health_check,
+        get_balance,
+        get_transactions,
+        create_withdrawal,
+        list_withdrawals,
+        get_withdrawal_by_id,
     ),
     modifiers(&SecurityAddon),
-    components(
-        schemas(
-            // Profile schemas
-            crate::domain::user::UserProfile,
-            crate::domain::user::UpdateProfileRequest,
-            crate::domain::user::UpgradeToSellerRequest,
-            crate::domain::user::UploadPhotoResponse,
-            profile::MessageResponse,
-            // Favorite schemas
-            crate::domain::favorite::Favorite,
-            crate::domain::favorite::AddFavoriteRequest,
-            crate::domain::favorite::FavoriteWithVehicle,
-            crate::domain::favorite::CheckFavoriteResponse,
-            favorite::MessageResponse,
-            // Rating schemas
-            crate::domain::review::CreateReviewRequest,
-            crate::domain::review::ReviewWithCustomer,
-            crate::domain::review::SellerRatingSummary,
-            crate::domain::review::RatingDistribution,
-            rating::SubmitReviewResponse,
-        )
-    ),
     tags(
-        (name = "Profile", description = "User profile management endpoints"),
-        (name = "Favorites", description = "Vehicle favorites/wishlist endpoints"),
-        (name = "Ratings", description = "Seller ratings and reviews endpoints")
+        (name = "Health", description = "Health check endpoints"),
+        (name = "Seller Balance", description = "Seller balance management"),
+        (name = "Seller Transactions", description = "Transaction history and logs"),
+        (name = "Seller Withdrawals", description = "Withdrawal request management")
     )
 )]
 struct ApiDoc;
 
 // Health check handler
+#[utoipa::path(
+    get,
+    path = "/health",
+    responses(
+        (status = 200, description = "Service is healthy", body = HealthStatus)
+    ),
+    tag = "Health"
+)]
 async fn health_check(State(pool): State<PgPool>) -> Json<HealthStatus> {
     let db_healthy = check_db_health(&pool).await;
 
@@ -101,7 +85,7 @@ async fn health_check(State(pool): State<PgPool>) -> Json<HealthStatus> {
     })
 }
 
-/// Build JWT-Only CORS configuration
+// Build JWT-Only CORS configuration
 fn configure_cors() -> CorsLayer {
     let frontend_url = std::env::var("FRONTEND_URL")
         .expect("FRONTEND_URL environment variable harus diset");
@@ -124,11 +108,11 @@ fn configure_cors() -> CorsLayer {
         .allow_origin(frontend_url.parse::<HeaderValue>().expect("Invalid FRONTEND_URL"))
         .allow_methods(allowed_methods)
         .allow_headers(allowed_headers)
-        .allow_credentials(false) 
-        .max_age(std::time::Duration::from_secs(86400)) 
+        .allow_credentials(false)
+        .max_age(std::time::Duration::from_secs(86400))
 }
 
-/// Security headers middleware 
+// Security headers middleware
 async fn security_headers_middleware(
     request: axum::extract::Request,
     next: axum::middleware::Next,
@@ -157,8 +141,6 @@ async fn security_headers_middleware(
     response
 }
 
-
-
 // Buat router dengan JWT-Only security
 pub fn create_router(state: AppState) -> Router {
     // OpenAPI documentation
@@ -179,24 +161,15 @@ pub fn create_router(state: AppState) -> Router {
 // All API routes require JWT authentication
 fn create_jwt_protected_routes(state: AppState) -> Router {
     let read_routes = Router::new()
-        // READ endpoints 
-        .route("/users/me", get(profile::get_my_profile))
-        .route("/users/{user_id}", get(profile::get_user_profile))
-        .route("/users/me/favorites", get(favorite::get_favorites))
-        .route("/users/me/favorites/check/{vehicle_id}", get(favorite::check_favorite))
-        .route("/sellers/{seller_id}/ratings", get(rating::get_seller_ratings))
-        .route("/sellers/{seller_id}/rating-summary", get(rating::get_seller_rating_summary))
-        .route("/sellers/me/reviews", get(rating::get_my_seller_reviews));
+        // READ endpoints
+        .route("/seller/balance", get(get_balance))
+        .route("/seller/transactions", get(get_transactions))
+        .route("/seller/withdrawals", get(list_withdrawals))
+        .route("/seller/withdrawals/{id}", get(get_withdrawal_by_id));
 
     let write_routes = Router::new()
         // WRITE endpoints 
-        .route("/users/me", put(profile::update_profile))
-        .route("/users/me/photo", post(profile::upload_profile_photo))
-        .route("/users/me/upgrade-seller", post(profile::upgrade_to_seller))
-        .route("/users/me/favorites", post(favorite::add_favorite))
-        .route("/users/me/favorites/{vehicle_id}", delete(favorite::remove_favorite))
-        .route("/sellers/{seller_id}/reviews", post(rating::submit_review))
-        // Apply strict rate limiting to write operations
+        .route("/seller/withdrawals", post(create_withdrawal))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             rate_limit_middleware

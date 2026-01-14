@@ -1,8 +1,11 @@
 use axum::{
     routing::{get, post, put, delete},
-    Router, Json, extract::State, http::StatusCode, middleware::{self, Next}, response::Response,
+    Router, Json, extract::State, 
+    http::{header, HeaderValue, Method, StatusCode}, 
+    middleware::{self, Next}, response::Response,
 };
 use sqlx::PgPool;
+use tower_http::cors::CorsLayer;
 use utoipa::{OpenApi, Modify};
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa_swagger_ui::SwaggerUi;
@@ -84,6 +87,33 @@ async fn health_check(State(pool): State<PgPool>) -> Json<HealthStatus> {
     })
 }
 
+// JWT-Only CORS configuration
+fn configure_cors() -> CorsLayer {
+    let frontend_url = env::var("FRONTEND_URL")
+        .expect("FRONTEND_URL environment variable harus diset");
+
+    let allowed_methods = vec![
+        Method::GET,
+        Method::POST,
+        Method::PUT,
+        Method::DELETE,
+        Method::OPTIONS,
+    ];
+
+    let allowed_headers = vec![
+        header::AUTHORIZATION,
+        header::ACCEPT,
+        header::CONTENT_TYPE,
+    ];
+
+    CorsLayer::new()
+        .allow_origin(frontend_url.parse::<HeaderValue>().expect("Invalid FRONTEND_URL"))
+        .allow_methods(allowed_methods)
+        .allow_headers(allowed_headers)
+        .allow_credentials(false)
+        .max_age(std::time::Duration::from_secs(86400))
+}
+
 // Buat router dengan JWT-Only security
 pub fn create_router(state: AppState) -> Router {
     // Log environment information
@@ -104,6 +134,7 @@ pub fn create_router(state: AppState) -> Router {
         .merge(Redoc::with_url("/redoc", openapi))
         .nest("/api", api_routes)
         .layer(middleware::from_fn(security_headers_middleware))
+        .layer(configure_cors())
         .layer(middleware::from_fn_with_state(state.clone(), rate_limit_middleware))
 }
 

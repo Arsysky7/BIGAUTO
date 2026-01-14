@@ -230,13 +230,14 @@ fn extract_token_from_query(uri: &axum::http::Uri) -> Result<String, AppError> {
     Err(AppError::unauthorized("Missing token parameter"))
 }
 
-// Validate JWT token dari query parameter
+// Validate JWT token 
 async fn validate_websocket_token(
     token: &str,
     state: &AppState,
 ) -> Result<WebSocketParticipant, AppError> {
-    let claims = crate::utils::jwt::validate_token(token)
-        .map_err(|_| AppError::unauthorized("Token tidak valid atau sudah expired"))?;
+    let claims = crate::utils::jwt::validate_token_with_blacklist(token, &state.db)
+        .await
+        .map_err(|_| AppError::unauthorized("Token tidak valid, expired, atau di-blacklist"))?;
 
     // Validasi role untuk chat service 
     if !claims.is_customer() && !claims.is_seller() {

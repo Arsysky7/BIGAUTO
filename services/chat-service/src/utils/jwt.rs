@@ -83,7 +83,7 @@ fn decode_jwt_token(token: &str) -> Result<TokenClaims, JwtError> {
     Ok(token_data.claims)
 }
 
-// Cek JWT blacklist menggunakan database secure function
+// Cek JWT blacklist 
 async fn check_jwt_blacklist(pool: &PgPool, claims: &TokenClaims) -> Result<(), JwtError> {
     let is_blacklisted: bool = sqlx::query_scalar!(
         "SELECT is_token_blacklisted_v2($1, $2)",
@@ -92,8 +92,11 @@ async fn check_jwt_blacklist(pool: &PgPool, claims: &TokenClaims) -> Result<(), 
     )
     .fetch_one(pool)
     .await
-    .map_err(|_| JwtError::DatabaseError)?
-    .unwrap_or(true);
+    .map_err(|e| {
+        tracing::error!("JWT blacklist check failed: {}", e);
+        JwtError::DatabaseError
+    })?
+    .unwrap_or(false);
 
     if is_blacklisted {
         return Err(JwtError::TokenBlacklisted);

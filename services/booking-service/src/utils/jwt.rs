@@ -58,25 +58,20 @@ fn decode_jwt_token(token: &str) -> Result<TokenClaims, JwtError> {
     Ok(token_data.claims)
 }
 
-// Validasi token type sesuai kebijakan JWT-Only
-fn validate_token_type(claims: &TokenClaims) -> Result<(), JwtError> {
-    if claims.token_type != "access" {
-        return Err(JwtError::InvalidTokenType);
-    }
-    Ok(())
-}
-
-// Cek JWT blacklist menggunakan database secure function 
+// Cek JWT blacklist 
 async fn check_jwt_blacklist(pool: &PgPool, claims: &TokenClaims) -> Result<(), JwtError> {
     let is_blacklisted: bool = sqlx::query_scalar!(
         "SELECT is_token_blacklisted_v2($1, $2)",
         claims.jti,
-        claims.sub.to_string()
+        claims.token_type
     )
     .fetch_one(pool)
     .await
-    .map_err(|_| JwtError::DatabaseError)?
-    .unwrap_or(true); 
+    .map_err(|e| {
+        tracing::error!("JWT blacklist check failed: {}", e);
+        JwtError::DatabaseError
+    })?
+    .unwrap_or(false); 
 
     if is_blacklisted {
         return Err(JwtError::TokenBlacklisted);
@@ -87,13 +82,10 @@ async fn check_jwt_blacklist(pool: &PgPool, claims: &TokenClaims) -> Result<(), 
 
 // Public JWT validation function dengan database trust boundary
 pub async fn validate_token(token: &str, pool: &PgPool) -> Result<TokenClaims, JwtError> {
-    // Decode dan validasi JWT token
+    // Decode JWT token
     let claims = decode_jwt_token(token)?;
 
-    // Validasi token type (access only)
-    validate_token_type(&claims)?;
-
-    // Cek blacklist dengan database secure function
+    // Cek blacklist 
     check_jwt_blacklist(pool, &claims).await?;
 
     Ok(claims)
@@ -101,7 +93,8 @@ pub async fn validate_token(token: &str, pool: &PgPool) -> Result<TokenClaims, J
 
 
 
-// Legacy function untuk testing only
+// Legacy function untuk testing only 
+#[cfg(test)]
 fn validate_token_legacy(token: &str) -> Result<TokenClaims, JwtError> {
     decode_jwt_token(token)
 }
@@ -189,4 +182,4 @@ mod tests {
         assert!(matches!(result.unwrap_err(), JwtError::MissingSecret));
     }
 
-    }
+}
