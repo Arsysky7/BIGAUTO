@@ -101,10 +101,18 @@ async fn health_check(State(pool): State<PgPool>) -> Json<HealthStatus> {
     })
 }
 
-/// Build JWT-Only CORS configuration
+/// Build JWT-Only CORS configuration untuk User Service
+/// Supports multiple origins (comma-separated) for development + production
 fn configure_cors() -> CorsLayer {
-    let frontend_url = std::env::var("FRONTEND_URL")
+    let frontend_urls = std::env::var("FRONTEND_URL")
         .expect("FRONTEND_URL environment variable harus diset");
+
+    // Parse comma-separated origins
+    // Example: "https://bigauto.com,http://localhost:5173,http://localhost:3000"
+    let allowed_origins: Vec<HeaderValue> = frontend_urls
+        .split(',')
+        .map(|s| s.trim().parse::<HeaderValue>().expect("Invalid FRONTEND_URL format"))
+        .collect();
 
     let allowed_methods = vec![
         Method::GET,
@@ -120,12 +128,18 @@ fn configure_cors() -> CorsLayer {
         header::CONTENT_TYPE,
     ];
 
+    let max_age = if std::env::var("RUST_ENV").unwrap_or_else(|_| "development".to_string()) == "production" {
+        std::time::Duration::from_secs(86400)  // 24 hours untuk production
+    } else {
+        std::time::Duration::from_secs(3600)    // 1 hour untuk development
+    };
+
     CorsLayer::new()
-        .allow_origin(frontend_url.parse::<HeaderValue>().expect("Invalid FRONTEND_URL"))
+        .allow_origin(allowed_origins)
         .allow_methods(allowed_methods)
         .allow_headers(allowed_headers)
-        .allow_credentials(false) 
-        .max_age(std::time::Duration::from_secs(86400)) 
+        .allow_credentials(false)
+        .max_age(max_age)
 }
 
 /// Security headers middleware 

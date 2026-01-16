@@ -203,10 +203,21 @@ pub async fn upload_profile_photo(
 
 // === Helper Functions ===
 
-// Cari user berdasarkan ID
+// Cari user berdasarkan ID 
 async fn find_user_by_id(pool: &PgPool, user_id: i32) -> Result<User, AppError> {
     let result = sqlx::query(
-        "SELECT * FROM users WHERE id = $1 AND is_active = true"
+        r#"
+        SELECT
+            id, email, name, phone,
+            email_verified, email_verified_at,
+            last_login_at, login_count,
+            is_active, deactivated_at,
+            is_seller, address, city,
+            profile_photo, business_name,
+            created_at, updated_at
+        FROM users
+        WHERE id = $1 AND is_active = true
+        "#
     )
     .bind(user_id)
     .fetch_optional(pool)
@@ -238,7 +249,14 @@ async fn update_user_profile(
             business_name = COALESCE($6, business_name),
             updated_at = NOW()
         WHERE id = $1
-        RETURNING *
+        RETURNING
+            id, email, name, phone,
+            email_verified, email_verified_at,
+            last_login_at, login_count,
+            is_active, deactivated_at,
+            is_seller, address, city,
+            profile_photo, business_name,
+            created_at, updated_at
         "#
     )
     .bind(user_id)
@@ -254,7 +272,7 @@ async fn update_user_profile(
     Ok(user)
 }
 
-// Set user sebagai seller
+// Set user sebagai seller 
 async fn set_user_as_seller(
     pool: &PgPool,
     user_id: i32,
@@ -268,7 +286,14 @@ async fn set_user_as_seller(
             business_name = $2,
             updated_at = NOW()
         WHERE id = $1
-        RETURNING *
+        RETURNING
+            id, email, name, phone,
+            email_verified, email_verified_at,
+            last_login_at, login_count,
+            is_active, deactivated_at,
+            is_seller, address, city,
+            profile_photo, business_name,
+            created_at, updated_at
         "#
     )
     .bind(user_id)
