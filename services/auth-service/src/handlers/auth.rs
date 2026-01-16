@@ -228,7 +228,7 @@ pub async fn register_handler(
 /// Verifikasi email menggunakan token dari link email
 #[utoipa::path(
     get,
-    path = "/api/auth/verify-email",
+    path = "/verify-email",
     params(
         ("token" = String, Query, description = "Token verifikasi dari email")
     ),
