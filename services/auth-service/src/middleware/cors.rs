@@ -1,27 +1,26 @@
 // JWT-Only CORS Configuration untuk Auth Service
 
 use axum::http::{header, HeaderValue, Method};
-use tower_http::cors::AllowMethods;
 use tower_http::cors::CorsLayer;
 use tower_http::cors::Any;
 
 /// Build CORS 
 pub fn configure_cors() -> CorsLayer {
-    let frontend_urls = std::env::var("FRONTEND_URL")
-        .expect("FRONTEND_URL environment variable harus diset");
+    // let frontend_urls = std::env::var("FRONTEND_URL")
+    //     .expect("FRONTEND_URL environment variable harus diset");
 
     // let allowed_origins: Vec<HeaderValue> = frontend_urls
     //     .split(',')
     //     .map(|s| s.trim().parse::<HeaderValue>().expect("Invalid FRONTEND_URL format"))
     //     .collect();
 
-    // let allowed_methods = build_allowed_methods();
-    // let allowed_headers = build_jwt_headers();
+    let allowed_methods = build_allowed_methods();
+    let allowed_headers = build_jwt_headers();
 
     CorsLayer::new()
         .allow_origin(Any)  
-        .allow_methods(build_allowed_methods())
-        .allow_headers(build_jwt_headers())
+        .allow_methods(allowed_methods)
+        .allow_headers(allowed_headers)
         .allow_credentials(false)
         .max_age(build_cors_max_age())
 }
