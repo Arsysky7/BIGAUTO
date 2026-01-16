@@ -1,72 +1,55 @@
-// JWT-Only CORS Configuration untuk Auth Service
+// Manual CORS Middleware
 
-use axum::http::{header, Method};
-use tower_http::cors::CorsLayer;
-use tower_http::cors::Any;
+use axum::{
+    extract::Request,
+    http::{header::HeaderName, HeaderValue, Method, StatusCode},
+    middleware::Next,
+    response::Response,
+};
 
-/// Build CORS 
-pub fn configure_cors() -> CorsLayer {
-    // let frontend_urls = std::env::var("FRONTEND_URL")
-    //     .expect("FRONTEND_URL environment variable harus diset");
+/// Manual CORS middleware
+pub async fn manual_cors_middleware(
+    request: Request,
+    next: Next,
+) -> Result<Response, std::convert::Infallible> {
+    let method = request.method().clone();
+    let origin = request
+        .headers()
+        .get("origin")
+        .and_then(|h| h.to_str().ok());
 
-    // let allowed_origins: Vec<HeaderValue> = frontend_urls
-    //     .split(',')
-    //     .map(|s| s.trim().parse::<HeaderValue>().expect("Invalid FRONTEND_URL format"))
-    //     .collect();
+    // Run the request
+    let mut response = next.run(request).await;
 
-    let allowed_methods = build_allowed_methods();
-    let allowed_headers = build_jwt_headers();
+    // Add CORS headers ke ALL responses
+    let headers = response.headers_mut();
 
-    CorsLayer::new()
-        .allow_origin(Any)  
-        .allow_methods(allowed_methods)
-        .allow_headers(allowed_headers)
-        .allow_credentials(false)
-        .max_age(build_cors_max_age())
-}
+    // Allow all origins
+    headers.insert(
+        HeaderName::from_static("access-control-allow-origin"),
+        HeaderValue::from_static("*"),
+    );
 
-/// Daftar HTTP methods yang diijinkan untuk API
-fn build_allowed_methods() -> Vec<Method> {
-    vec![
-        Method::GET,
-        Method::POST,
-        Method::PUT,
-        Method::DELETE,
-        Method::OPTIONS,
-    ]
-}
+    // Allow methods
+    let allow_methods = match method.as_str() {
+        "OPTIONS" => "GET, POST, PUT, DELETE, OPTIONS",
+        _ => "GET, POST, PUT, DELETE, OPTIONS",
+    };
+    headers.insert(
+        HeaderName::from_static("access-control-allow-methods"),
+        HeaderValue::from_static(allow_methods),
+    );
 
-/// Headers yang diijinkan untuk JWT-Only authentication
-fn build_jwt_headers() -> Vec<header::HeaderName> {
-    vec![
-        header::AUTHORIZATION,
-        header::ACCEPT,      
-        header::CONTENT_TYPE,  
-    ]
-}
+    // Allow headers
+    headers.insert(
+        HeaderName::from_static("access-control-allow-headers"),
+        HeaderValue::from_static("authorization, content-type, accept"),
+    );
 
-/// Max age untuk CORS preflight cache berdasarkan environment
-fn build_cors_max_age() -> std::time::Duration {
-    let env = std::env::var("RUST_ENV").unwrap_or_else(|_| "development".to_string());
-
-    match env.as_str() {
-        "production" => std::time::Duration::from_secs(86400), 
-        _ => std::time::Duration::from_secs(3600),             
+    // Handle preflight OPTIONS
+    if method == Method::OPTIONS {
+        *response.status_mut() = StatusCode::OK;
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_cors_configuration() {
-        // Test CORS configuration without panicking
-        std::env::set_var("FRONTEND_URL", "http://localhost:3000");
-        std::env::set_var("RUST_ENV", "test");
-
-        let cors_layer = configure_cors();
-        // Just ensure it doesn't panic - actual CORS testing needs integration tests
-        assert!(true);
-    }
+    Ok(response)
 }

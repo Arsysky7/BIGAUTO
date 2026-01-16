@@ -7,8 +7,7 @@ use utoipa_swagger_ui::SwaggerUi;
 use crate::config::AppState;
 use crate::middleware::{
     rate_limit::auth_rate_limit_middleware,
-    security_headers::security_headers_middleware,
-    cors::configure_cors,
+    cors::manual_cors_middleware,
 };
 
 // Security scheme modifier for Bearer authentication
@@ -161,11 +160,13 @@ async fn health_check(
 
 /// Create the main application router
 pub fn create_router(state: AppState) -> Router {
-    // Base security layers
+    // Base security layers 
     Router::new()
-        // CORS
-        .layer(configure_cors())
-        // Security headers
+        // CORS middleware
+        .layer(middleware::from_fn(manual_cors_middleware))
+        // Old tower_http CORS
+        // .layer(configure_cors())
+        // Security headers 
         // .layer(middleware::from_fn(security_headers_middleware))
         // Rate limiting with proper state
         .layer(middleware::from_fn_with_state(
