@@ -114,22 +114,21 @@ pub async fn validate_token(
     Ok(claims)
 }
 
-/// Check token status di blacklist 
+/// Check token status di blacklist
 pub async fn validate_blacklist_status(
     claims: &TokenClaims,
     db: &PgPool,
 ) -> Result<(), String> {
-    let is_blacklisted: bool = sqlx::query_scalar!(
-        "SELECT is_token_blacklisted_v2($1, $2)",
-        claims.jti,
-        claims.token_type
+    let is_blacklisted: Option<bool> = sqlx::query_scalar::<_, bool>(
+        "SELECT is_token_blacklisted_v2($1, $2)"
     )
-    .fetch_one(db)
+    .bind(&claims.jti)
+    .bind(&claims.token_type)
+    .fetch_optional(db)
     .await
-    .map_err(|e| format!("Blacklist validation failed: {}", e))?
-    .unwrap_or(false);
+    .map_err(|e| format!("Blacklist validation failed: {}", e))?;
 
-    if is_blacklisted {
+    if is_blacklisted.unwrap_or(false) {
         tracing::warn!("Token has been blacklisted - user_id: {}, jti: {}...",
             claims.sub,
             &claims.jti[..8.min(claims.jti.len())]

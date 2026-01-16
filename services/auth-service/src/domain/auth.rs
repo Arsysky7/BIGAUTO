@@ -725,7 +725,7 @@ async fn execute_logout_security_procedures(
     Ok(())
 }
 
-/// Blacklist JWT token menggunakan secure function 
+/// Blacklist JWT token menggunakan secure function
 async fn blacklist_jwt_token(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     jti: &str,
@@ -734,12 +734,13 @@ async fn blacklist_jwt_token(
     reason: &str,
 ) -> Result<(), AppError> {
     // Gunakan secure function untuk blacklist token
-    sqlx::query_scalar!("SELECT blacklist_token($1, $2, $3)",
-        jti,
-        token_type,
-        reason
+    let _: Option<bool> = sqlx::query_scalar::<_, bool>(
+        "SELECT blacklist_token($1, $2, $3)"
     )
-    .fetch_one(tx.as_mut())
+    .bind(jti)
+    .bind(token_type)
+    .bind(reason)
+    .fetch_optional(tx.as_mut())
     .await
     .map_err(|e| AppError::InternalError(format!("Gagal blacklist token via secure function: {}", e)))?;
 
@@ -754,32 +755,31 @@ async fn blacklist_related_access_tokens(
     refresh_jti: &str,
 ) -> Result<(), AppError> {
     // Cari session terkait dengan refresh token menggunakan query
-    let session_data: Option<i32> = sqlx::query_scalar!(
-        "SELECT id FROM user_sessions WHERE refresh_token = $1 AND expires_at > NOW() AND is_active = true",
-        refresh_jti
+    let session_data: Option<i32> = sqlx::query_scalar::<_, i32>(
+        "SELECT id FROM user_sessions WHERE refresh_token = $1 AND expires_at > NOW() AND is_active = true"
     )
+    .bind(refresh_jti)
     .fetch_optional(tx.as_mut())
     .await?;
 
     if let Some(session_id) = session_data {
         // Ambil access token JTI dari session
-        let access_jti = sqlx::query_scalar!(
-            "SELECT access_token_jti FROM user_sessions WHERE id = $1",
-            session_id
+        let access_jti: Option<String> = sqlx::query_scalar::<_, String>(
+            "SELECT access_token_jti FROM user_sessions WHERE id = $1"
         )
+        .bind(session_id)
         .fetch_optional(tx.as_mut())
-        .await?
-        .flatten(); 
+        .await?;
 
         if let Some(jti) = access_jti {
             blacklist_jwt_token(&mut *tx, jti.as_str(), "access", user_id, "user_logout").await?;
         }
 
         // Update session menjadi tidak aktif
-        sqlx::query!(
-            "UPDATE user_sessions SET is_active = false, updated_at = NOW() WHERE id = $1",
-            session_id
+        sqlx::query(
+            "UPDATE user_sessions SET is_active = false, updated_at = NOW() WHERE id = $1"
         )
+        .bind(session_id)
         .execute(tx.as_mut())
         .await
         .map_err(|e| AppError::InternalError(format!("Gagal update session logout: {}", e)))?;
@@ -793,10 +793,10 @@ async fn blacklist_related_access_tokens(
 /// Invalidate semua session user untuk multi-device logout
 async fn invalidate_user_sessions(db: &sqlx::PgPool, user_id: i32) -> Result<(), AppError> {
     // Update semua session user menjadi tidak aktif
-    sqlx::query!(
-        "UPDATE user_sessions SET is_active = false, updated_at = NOW() WHERE user_id = $1 AND is_active = true",
-        user_id
+    sqlx::query(
+        "UPDATE user_sessions SET is_active = false, updated_at = NOW() WHERE user_id = $1 AND is_active = true"
     )
+    .bind(user_id)
     .execute(db)
     .await
     .map_err(|e| AppError::InternalError(format!("Gagal invalidate user sessions: {}", e)))?;

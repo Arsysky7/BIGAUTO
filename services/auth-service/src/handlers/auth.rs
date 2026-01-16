@@ -447,17 +447,18 @@ pub async fn logout_handler(
     // Execute logout dengan keamanan enterprise compliance
     auth_domain::logout(&state, &req.refresh_token).await?;
 
-    // Ekstrak dan blacklist access token 
+    // Ekstrak dan blacklist access token
     if let Ok(claims) = crate::utils::jwt::validate_token_signature(&access_token, &state.config.jwt_secret) {
         // Blacklist access token via secure function
-        let _ = sqlx::query_scalar!(
-            "SELECT blacklist_token($1, $2, $3)",
-            claims.jti,
-            "access",
-            "user_logout"
+        let _: Option<bool> = sqlx::query_scalar::<_, bool>(
+            "SELECT blacklist_token($1, $2, $3)"
         )
-        .fetch_one(&state.db)
-        .await;
+        .bind(&claims.jti)
+        .bind("access")
+        .bind("user_logout")
+        .fetch_optional(&state.db)
+        .await
+        .unwrap_or(None);
 
         tracing::info!("Access token blacklisted: jti={}", claims.jti);
     } else {

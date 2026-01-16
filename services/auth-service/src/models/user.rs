@@ -54,24 +54,21 @@ pub struct UpdateUserProfile {
 // Response model dengan guaranteed timestamps untuk API
 
 impl User {
-    // Cari user berdasarkan email 
+    // Cari user berdasarkan email
     pub async fn find_by_email(pool: &PgPool, email: &str) -> Result<Option<Self>, sqlx::Error> {
         // Validasi input untuk mencegah SQL injection
         let normalized_email = email.trim().to_lowercase();
 
-        sqlx::query_as!(
-            Self,
-            r#"
-            SELECT id, email, password_hash, name, phone, is_seller, address, city,
-                   profile_photo, business_name, email_verified, email_verified_at,
-                   last_login_at, login_count, is_active, deactivated_at,
-                   otp_request_count, otp_blocked_until, last_otp_request_at,
-                   created_at, updated_at
-            FROM users
-            WHERE email = $1 AND is_active = true
-            "#,
-            normalized_email
+        sqlx::query_as::<_, User>(
+            "SELECT id, email, password_hash, name, phone, is_seller, address, city,
+                    profile_photo, business_name, email_verified, email_verified_at,
+                    last_login_at, login_count, is_active, deactivated_at,
+                    otp_request_count, otp_blocked_until, last_otp_request_at,
+                    created_at, updated_at
+             FROM users
+             WHERE email = $1 AND is_active = true"
         )
+        .bind(normalized_email)
         .fetch_optional(pool)
         .await
     }
@@ -83,19 +80,16 @@ impl User {
             return Ok(None);
         }
 
-        sqlx::query_as!(
-            Self,
-            r#"
-            SELECT id, email, password_hash, name, phone, is_seller, address, city,
-                   profile_photo, business_name, email_verified, email_verified_at,
-                   last_login_at, login_count, is_active, deactivated_at,
-                   otp_request_count, otp_blocked_until, last_otp_request_at,
-                   created_at, updated_at
-            FROM users
-            WHERE id = $1 AND is_active = true
-            "#,
-            user_id
+        sqlx::query_as::<_, User>(
+            "SELECT id, email, password_hash, name, phone, is_seller, address, city,
+                    profile_photo, business_name, email_verified, email_verified_at,
+                    last_login_at, login_count, is_active, deactivated_at,
+                    otp_request_count, otp_blocked_until, last_otp_request_at,
+                    created_at, updated_at
+             FROM users
+             WHERE id = $1 AND is_active = true"
         )
+        .bind(user_id)
         .fetch_optional(pool)
         .await
     }
@@ -107,24 +101,21 @@ impl User {
         let normalized_name = new_user.name.trim().to_string();
         let normalized_phone = new_user.phone.trim().to_string();
 
-        sqlx::query_as!(
-            Self,
-            r#"
-            INSERT INTO users (email, password_hash, name, phone, address, city)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            RETURNING id, email, password_hash, name, phone, is_seller, address, city,
-                   profile_photo, business_name, email_verified, email_verified_at,
-                   last_login_at, login_count, is_active, deactivated_at,
-                   otp_request_count, otp_blocked_until, last_otp_request_at,
-                   created_at, updated_at
-            "#,
-            normalized_email,
-            new_user.password_hash,
-            normalized_name,
-            normalized_phone,
-            new_user.address,
-            new_user.city
+        sqlx::query_as::<_, User>(
+            "INSERT INTO users (email, password_hash, name, phone, address, city)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             RETURNING id, email, password_hash, name, phone, is_seller, address, city,
+                    profile_photo, business_name, email_verified, email_verified_at,
+                    last_login_at, login_count, is_active, deactivated_at,
+                    otp_request_count, otp_blocked_until, last_otp_request_at,
+                    created_at, updated_at"
         )
+        .bind(normalized_email)
+        .bind(&new_user.password_hash)
+        .bind(normalized_name)
+        .bind(normalized_phone)
+        .bind(&new_user.address)
+        .bind(&new_user.city)
         .fetch_one(pool)
         .await
     }

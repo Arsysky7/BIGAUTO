@@ -1,55 +1,55 @@
-// Manual CORS Middleware
+// JWT-Only CORS Configuration untuk Auth Service
 
-use axum::{
-    extract::Request,
-    http::{header::HeaderName, HeaderValue, Method, StatusCode},
-    middleware::Next,
-    response::Response,
-};
+use axum::http::{header, HeaderValue, Method};
+use tower_http::cors::CorsLayer;
 
-/// Manual CORS middleware
-pub async fn manual_cors_middleware(
-    request: Request,
-    next: Next,
-) -> Result<Response, std::convert::Infallible> {
-    let method = request.method().clone();
-    let origin = request
-        .headers()
-        .get("origin")
-        .and_then(|h| h.to_str().ok());
+/// Build CORS
+pub fn configure_cors() -> CorsLayer {
+    let frontend_urls = std::env::var("FRONTEND_URL")
+        .expect("FRONTEND_URL environment variable harus diset");
 
-    // Run the request
-    let mut response = next.run(request).await;
+    let allowed_origins: Vec<HeaderValue> = frontend_urls
+        .split(',')
+        .map(|s| s.trim().parse::<HeaderValue>().expect("Invalid FRONTEND_URL format"))
+        .collect();
 
-    // Add CORS headers ke ALL responses
-    let headers = response.headers_mut();
+    let allowed_methods = build_allowed_methods();
+    let allowed_headers = build_jwt_headers();
 
-    // Allow all origins
-    headers.insert(
-        HeaderName::from_static("access-control-allow-origin"),
-        HeaderValue::from_static("*"),
-    );
+    CorsLayer::new()
+        .allow_origin(allowed_origins)
+        .allow_methods(allowed_methods)
+        .allow_headers(allowed_headers)
+        .allow_credentials(false)
+        .max_age(build_cors_max_age())
+}
 
-    // Allow methods
-    let allow_methods = match method.as_str() {
-        "OPTIONS" => "GET, POST, PUT, DELETE, OPTIONS",
-        _ => "GET, POST, PUT, DELETE, OPTIONS",
-    };
-    headers.insert(
-        HeaderName::from_static("access-control-allow-methods"),
-        HeaderValue::from_static(allow_methods),
-    );
+/// Daftar HTTP methods yang diijinkan untuk API
+fn build_allowed_methods() -> Vec<Method> {
+    vec![
+        Method::GET,
+        Method::POST,
+        Method::PUT,
+        Method::DELETE,
+        Method::OPTIONS,
+    ]
+}
 
-    // Allow headers
-    headers.insert(
-        HeaderName::from_static("access-control-allow-headers"),
-        HeaderValue::from_static("authorization, content-type, accept"),
-    );
+/// Headers yang diijinkan untuk JWT-Only authentication
+fn build_jwt_headers() -> Vec<header::HeaderName> {
+    vec![
+        header::AUTHORIZATION,
+        header::ACCEPT,
+        header::CONTENT_TYPE,
+    ]
+}
 
-    // Handle preflight OPTIONS
-    if method == Method::OPTIONS {
-        *response.status_mut() = StatusCode::OK;
+/// Max age untuk CORS preflight cache berdasarkan environment
+fn build_cors_max_age() -> std::time::Duration {
+    let env = std::env::var("RUST_ENV").unwrap_or_else(|_| "development".to_string());
+
+    match env.as_str() {
+        "production" => std::time::Duration::from_secs(86400),
+        _ => std::time::Duration::from_secs(3600),
     }
-
-    Ok(response)
 }

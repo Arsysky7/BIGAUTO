@@ -7,7 +7,8 @@ use utoipa_swagger_ui::SwaggerUi;
 use crate::config::AppState;
 use crate::middleware::{
     rate_limit::auth_rate_limit_middleware,
-    cors::manual_cors_middleware,
+    cors::configure_cors,
+    security_headers::security_headers_middleware,
 };
 
 // Security scheme modifier for Bearer authentication
@@ -160,25 +161,20 @@ async fn health_check(
 
 /// Create the main application router
 pub fn create_router(state: AppState) -> Router {
-    // Base security layers 
     Router::new()
-        // CORS middleware
-        .layer(middleware::from_fn(manual_cors_middleware))
-        // Old tower_http CORS
-        // .layer(configure_cors())
-        // Security headers 
-        // .layer(middleware::from_fn(security_headers_middleware))
-        // Rate limiting with proper state
+        // Merge all routes first
+        .merge(create_public_routes(state.clone()))
+        .merge(create_jwt_protected_routes(state.clone()))
+        .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
+        // Apply CORS
+        .layer(configure_cors())
+        // Security headers
+        .layer(middleware::from_fn(security_headers_middleware))
+        // Rate limiting
         .layer(middleware::from_fn_with_state(
-            state.clone(),
+            state,
             auth_rate_limit_middleware
         ))
-        // Merge public routes
-        .merge(create_public_routes(state.clone()))
-        // Merge protected routes
-        .merge(create_jwt_protected_routes(state))
-        // Add Swagger UI documentation
-        .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
 }
 
 
