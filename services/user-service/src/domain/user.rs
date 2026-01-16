@@ -3,14 +3,11 @@ use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, FromRow};
 use utoipa::ToSchema;
 
-// Model user dari database
+// Model user dari database 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize, ToSchema)]
 pub struct User {
     pub id: i32,
     pub email: String,
-    #[serde(skip_serializing)]
-    #[allow(dead_code)]
-    pub password_hash: String,
     pub name: String,
     pub phone: String,
     pub email_verified: bool,

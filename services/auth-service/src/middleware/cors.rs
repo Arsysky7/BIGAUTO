@@ -3,14 +3,11 @@
 use axum::http::{header, HeaderValue, Method};
 use tower_http::cors::CorsLayer;
 
-/// Build CORS configuration untuk JWT-Only authentication
-/// Supports multiple origins (comma-separated) for development + production
+/// Build CORS 
 pub fn configure_cors() -> CorsLayer {
     let frontend_urls = std::env::var("FRONTEND_URL")
         .expect("FRONTEND_URL environment variable harus diset");
 
-    // Parse comma-separated origins
-    // Example: "https://bigauto.com,http://localhost:5173,http://localhost:3000"
     let allowed_origins: Vec<HeaderValue> = frontend_urls
         .split(',')
         .map(|s| s.trim().parse::<HeaderValue>().expect("Invalid FRONTEND_URL format"))

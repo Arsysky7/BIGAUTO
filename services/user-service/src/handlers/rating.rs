@@ -447,7 +447,7 @@ async fn check_customer_transaction_history(
     customer_id: i32,
     seller_id: i32,
 ) -> Result<bool, AppError> {
-    let result = sqlx::query_scalar!(
+    let result: Option<bool> = sqlx::query_scalar::<_, bool>(
         r#"
         SELECT EXISTS (
             SELECT 1 FROM rental_bookings
@@ -456,11 +456,11 @@ async fn check_customer_transaction_history(
             SELECT 1 FROM sale_orders
             WHERE buyer_id = $1 AND seller_id = $2 AND status = 'completed'
         )
-        "#,
-        customer_id,
-        seller_id
+        "#
     )
-    .fetch_one(pool)
+    .bind(customer_id)
+    .bind(seller_id)
+    .fetch_optional(pool)
     .await?;
 
     Ok(result.unwrap_or(false))
@@ -472,12 +472,12 @@ async fn check_existing_review(
     customer_id: i32,
     seller_id: i32,
 ) -> Result<bool, AppError> {
-    let result = sqlx::query_scalar!(
-        "SELECT EXISTS(SELECT 1 FROM reviews WHERE customer_id = $1 AND seller_id = $2)",
-        customer_id,
-        seller_id
+    let result: Option<bool> = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM reviews WHERE customer_id = $1 AND seller_id = $2)"
     )
-    .fetch_one(pool)
+    .bind(customer_id)
+    .bind(seller_id)
+    .fetch_optional(pool)
     .await?;
 
     Ok(result.unwrap_or(false))
