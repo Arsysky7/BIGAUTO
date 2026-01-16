@@ -161,12 +161,12 @@ async fn health_check(
 
 /// Create the main application router
 pub fn create_router(state: AppState) -> Router {
-    // Base security layers 
+    // Base security layers
     Router::new()
         // CORS
         .layer(configure_cors())
-        // Security headers 
-        .layer(middleware::from_fn(security_headers_middleware))
+        // Security headers
+        // .layer(middleware::from_fn(security_headers_middleware))
         // Rate limiting with proper state
         .layer(middleware::from_fn_with_state(
             state.clone(),
