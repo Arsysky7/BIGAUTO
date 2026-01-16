@@ -1,6 +1,6 @@
 // JWT-Only CORS Configuration untuk Auth Service
 
-use axum::http::{header, HeaderValue, Method};
+use axum::http::{header, Method};
 use tower_http::cors::CorsLayer;
 use tower_http::cors::Any;
 
