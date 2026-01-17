@@ -21,7 +21,9 @@ pub struct BrandQuery {
     tag = "Filters",
     responses(
         (status = 200, description = "List cities", body = Vec<City>),
-    )
+        (status = 401, description = "Unauthorized"),
+    ),
+    security(("bearer_auth" = []))
 )]
 pub async fn get_cities(
     State(pool): State<PgPool>,
@@ -37,7 +39,9 @@ pub async fn get_cities(
     tag = "Filters",
     responses(
         (status = 200, description = "List brands", body = Vec<Brand>),
-    )
+        (status = 401, description = "Unauthorized"),
+    ),
+    security(("bearer_auth" = []))
 )]
 pub async fn get_brands(
     State(pool): State<PgPool>,
@@ -57,7 +61,9 @@ pub async fn get_brands(
     responses(
         (status = 200, description = "List models", body = Vec<Model>),
         (status = 400, description = "Brand required"),
-    )
+        (status = 401, description = "Unauthorized"),
+    ),
+    security(("bearer_auth" = []))
 )]
 pub async fn get_models(
     Query(query): Query<BrandQuery>,

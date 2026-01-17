@@ -153,8 +153,10 @@ pub async fn submit_review(
     ),
     responses(
         (status = 200, description = "List ratings berhasil diambil", body = Vec<ReviewWithCustomer>),
+        (status = 401, description = "Unauthorized"),
         (status = 404, description = "Seller tidak ditemukan"),
-    )
+    ),
+    security(("bearer_auth" = []))
 )]
 pub async fn get_seller_ratings(
     Path(seller_id): Path<i32>,
@@ -176,8 +178,10 @@ pub async fn get_seller_ratings(
     ),
     responses(
         (status = 200, description = "Rating summary berhasil diambil", body = SellerRatingSummary),
+        (status = 401, description = "Unauthorized"),
         (status = 404, description = "Seller tidak ditemukan"),
-    )
+    ),
+    security(("bearer_auth" = []))
 )]
 pub async fn get_seller_rating_summary(
     Path(seller_id): Path<i32>,

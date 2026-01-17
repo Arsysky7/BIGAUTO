@@ -30,7 +30,9 @@ pub struct MessageResponse {
     params(VehicleFilter),
     responses(
         (status = 200, description = "List vehicles", body = VehicleListResponse),
-    )
+        (status = 401, description = "Unauthorized"),
+    ),
+    security(("bearer_auth" = []))
 )]
 pub async fn list_vehicles(
     Query(filter): Query<VehicleFilter>,
@@ -65,8 +67,10 @@ pub async fn list_vehicles(
     params(("id" = i32, Path, description = "Vehicle ID")),
     responses(
         (status = 200, description = "Vehicle detail", body = VehicleResponse),
+        (status = 401, description = "Unauthorized"),
         (status = 404, description = "Vehicle tidak ditemukan"),
-    )
+    ),
+    security(("bearer_auth" = []))
 )]
 pub async fn get_vehicle(
     Path(id): Path<i32>,
