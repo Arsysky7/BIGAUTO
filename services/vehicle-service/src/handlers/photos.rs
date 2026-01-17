@@ -12,7 +12,7 @@ use crate::{
 use super::vehicles::map_to_response;
 
 const MAX_PHOTOS: usize = 10;
-const MAX_FILE_SIZE: usize = 5 * 1024 * 1024; // 5MB
+const MAX_FILE_SIZE: usize = 5 * 1024 * 1024;
 
 // Upload additional photos
 #[utoipa::path(

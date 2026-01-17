@@ -51,11 +51,13 @@ pub async fn get_my_profile(
     get,
     path = "/api/users/{user_id}",
     tag = "Profile",
+    security(("bearer_auth" = [])),
     params(
         ("user_id" = i32, Path, description = "User ID")
     ),
     responses(
         (status = 200, description = "Profile berhasil diambil", body = UserProfile),
+        (status = 401, description = "Unauthorized"),
         (status = 404, description = "User tidak ditemukan"),
     )
 )]

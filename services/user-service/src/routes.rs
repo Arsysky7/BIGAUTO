@@ -60,6 +60,7 @@ impl Modify for SecurityAddon {
         rating::get_seller_rating_summary,
         rating::get_my_seller_reviews,
     ),
+    security(("bearer_auth" = [])),
     modifiers(&SecurityAddon),
     components(
         schemas(
