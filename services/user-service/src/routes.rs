@@ -102,13 +102,10 @@ async fn health_check(State(pool): State<PgPool>) -> Json<HealthStatus> {
 }
 
 /// Build JWT-Only CORS configuration untuk User Service
-/// Supports multiple origins (comma-separated) for development + production
 fn configure_cors() -> CorsLayer {
     let frontend_urls = std::env::var("FRONTEND_URL")
-        .expect("FRONTEND_URL environment variable harus diset");
+        .unwrap_or_else(|_| "http://localhost:5173".to_string());
 
-    // Parse comma-separated origins
-    // Example: "https://bigauto.com,http://localhost:5173,http://localhost:3000"
     let allowed_origins: Vec<HeaderValue> = frontend_urls
         .split(',')
         .map(|s| s.trim().parse::<HeaderValue>().expect("Invalid FRONTEND_URL format"))
@@ -129,9 +126,9 @@ fn configure_cors() -> CorsLayer {
     ];
 
     let max_age = if std::env::var("RUST_ENV").unwrap_or_else(|_| "development".to_string()) == "production" {
-        std::time::Duration::from_secs(86400)  // 24 hours untuk production
+        std::time::Duration::from_secs(86400)  
     } else {
-        std::time::Duration::from_secs(3600)    // 1 hour untuk development
+        std::time::Duration::from_secs(3600)    
     };
 
     CorsLayer::new()
@@ -183,33 +180,34 @@ pub fn create_router(state: AppState) -> Router {
         .route("/health", get(health_check).with_state(state.db.clone()))
         .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", openapi.clone()))
         .merge(Redoc::with_url("/redoc", openapi))
-        // Security layers (JWT-Only)
-        .layer(axum::middleware::from_fn(security_headers_middleware))
+        // Merge API 
+        .merge(create_jwt_protected_routes(state))
+        // CORS layer 
         .layer(configure_cors())
-        // API routes dengan JWT protection
-        .nest("/api", create_jwt_protected_routes(state))
+        // Security headers 
+        .layer(axum::middleware::from_fn(security_headers_middleware))
 }
 
 // All API routes require JWT authentication
 fn create_jwt_protected_routes(state: AppState) -> Router {
     let read_routes = Router::new()
-        // READ endpoints 
-        .route("/users/me", get(profile::get_my_profile))
-        .route("/users/{user_id}", get(profile::get_user_profile))
-        .route("/users/me/favorites", get(favorite::get_favorites))
-        .route("/users/me/favorites/check/{vehicle_id}", get(favorite::check_favorite))
-        .route("/sellers/{seller_id}/ratings", get(rating::get_seller_ratings))
-        .route("/sellers/{seller_id}/rating-summary", get(rating::get_seller_rating_summary))
-        .route("/sellers/me/reviews", get(rating::get_my_seller_reviews));
+        // READ endpoints
+        .route("/api/users/me", get(profile::get_my_profile))
+        .route("/api/users/{user_id}", get(profile::get_user_profile))
+        .route("/api/users/me/favorites", get(favorite::get_favorites))
+        .route("/api/users/me/favorites/check/{vehicle_id}", get(favorite::check_favorite))
+        .route("/api/sellers/{seller_id}/ratings", get(rating::get_seller_ratings))
+        .route("/api/sellers/{seller_id}/rating-summary", get(rating::get_seller_rating_summary))
+        .route("/api/sellers/me/reviews", get(rating::get_my_seller_reviews));
 
     let write_routes = Router::new()
-        // WRITE endpoints 
-        .route("/users/me", put(profile::update_profile))
-        .route("/users/me/photo", post(profile::upload_profile_photo))
-        .route("/users/me/upgrade-seller", post(profile::upgrade_to_seller))
-        .route("/users/me/favorites", post(favorite::add_favorite))
-        .route("/users/me/favorites/{vehicle_id}", delete(favorite::remove_favorite))
-        .route("/sellers/{seller_id}/reviews", post(rating::submit_review))
+        // WRITE endpoints
+        .route("/api/users/me", put(profile::update_profile))
+        .route("/api/users/me/photo", post(profile::upload_profile_photo))
+        .route("/api/users/me/upgrade-seller", post(profile::upgrade_to_seller))
+        .route("/api/users/me/favorites", post(favorite::add_favorite))
+        .route("/api/users/me/favorites/{vehicle_id}", delete(favorite::remove_favorite))
+        .route("/api/sellers/{seller_id}/reviews", post(rating::submit_review))
         // Apply strict rate limiting to write operations
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),

@@ -69,20 +69,19 @@ fn validate_token_type(claims: &TokenClaims) -> Result<(), JwtError> {
 
 // Cek JWT blacklist di database
 async fn check_jwt_blacklist(pool: &PgPool, claims: &TokenClaims) -> Result<(), JwtError> {
-    let is_blacklisted = sqlx::query_scalar!(
-        "SELECT is_token_blacklisted_v2($1, $2)",
-        claims.jti,
-        claims.token_type
+    let is_blacklisted: Option<bool> = sqlx::query_scalar::<_, bool>(
+        "SELECT is_token_blacklisted_v2($1, $2)"
     )
-    .fetch_one(pool)
+    .bind(&claims.jti)
+    .bind(&claims.token_type)
+    .fetch_optional(pool)
     .await
     .map_err(|e| {
         tracing::error!("JWT blacklist check failed: {}", e);
         JwtError::InvalidToken
-    })?
-    .unwrap_or(false);
+    })?;
 
-    if is_blacklisted {
+    if is_blacklisted.unwrap_or(false) {
         tracing::warn!(
             "Blacklisted token access attempt - jti: {}, user_id: {}, email: {}",
             claims.jti,
