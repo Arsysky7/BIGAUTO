@@ -110,7 +110,7 @@ impl Review {
     /// Cleanup spam/inappropriate reviews (flagged for more than 7 days)
     pub async fn cleanup_spam_reviews(pool: &PgPool) -> Result<u64, sqlx::Error> {
         let result = sqlx::query(
-            "DELETE FROM reviews WHERE is_inappropriate = true AND updated_at < NOW() - INTERVAL '7 days'"
+            "DELETE FROM reviews WHERE is_visible = false AND updated_at < NOW() - INTERVAL '7 days'"
         )
         .execute(pool)
         .await?;
