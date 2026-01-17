@@ -87,10 +87,15 @@ async fn health_check(State(pool): State<PgPool>) -> Json<HealthStatus> {
     })
 }
 
-// JWT-Only CORS configuration
+// JWT-Only CORS
 fn configure_cors() -> CorsLayer {
-    let frontend_url = env::var("FRONTEND_URL")
+    let frontend_urls = env::var("FRONTEND_URL")
         .expect("FRONTEND_URL environment variable harus diset");
+
+    let allowed_origins: Vec<HeaderValue> = frontend_urls
+        .split(',')
+        .map(|s| s.trim().parse::<HeaderValue>().expect("Invalid FRONTEND_URL format"))
+        .collect();
 
     let allowed_methods = vec![
         Method::GET,
@@ -106,12 +111,18 @@ fn configure_cors() -> CorsLayer {
         header::CONTENT_TYPE,
     ];
 
+    let max_age = if env::var("RUST_ENV").unwrap_or_else(|_| "development".to_string()) == "production" {
+        std::time::Duration::from_secs(86400)
+    } else {
+        std::time::Duration::from_secs(3600)
+    };
+
     CorsLayer::new()
-        .allow_origin(frontend_url.parse::<HeaderValue>().expect("Invalid FRONTEND_URL"))
+        .allow_origin(allowed_origins)
         .allow_methods(allowed_methods)
         .allow_headers(allowed_headers)
         .allow_credentials(false)
-        .max_age(std::time::Duration::from_secs(86400))
+        .max_age(max_age)
 }
 
 // Buat router dengan JWT-Only security
@@ -123,18 +134,19 @@ pub fn create_router(state: AppState) -> Router {
         tracing::info!("Running in DEVELOPMENT mode");
     }
 
-    // Build route hierarchy dengan proper security layering
-    let api_routes = build_api_routes_with_auth(state.clone());
-
     let openapi = ApiDoc::openapi();
 
     Router::new()
         .route("/health", get(health_check).with_state(state.db.clone()))
         .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", openapi.clone()))
         .merge(Redoc::with_url("/redoc", openapi))
-        .nest("/api", api_routes)
-        .layer(middleware::from_fn(security_headers_middleware))
+        // Merge API routes
+        .merge(build_api_routes_with_auth(state.clone()))
+        // CORS layer 
         .layer(configure_cors())
+        // Security headers 
+        .layer(middleware::from_fn(security_headers_middleware))
+        // Rate limiting 
         .layer(middleware::from_fn_with_state(state.clone(), rate_limit_middleware))
 }
 
@@ -168,25 +180,25 @@ async fn security_headers_middleware(request: axum::extract::Request, next: Next
     Ok(response)
 }
 
-// Build API routes dengan JWT authentication 
+// Build API routes dengan JWT authentication
 fn build_api_routes_with_auth(state: AppState) -> Router {
     // All API routes require JWT authentication
     let api_routes = Router::new()
         // Vehicles - All endpoints
-        .route("/vehicles", get(vehicles::list_vehicles))
-        .route("/vehicles/{id}", get(vehicles::get_vehicle))
-        .route("/vehicles", post(vehicles::create_vehicle))
-        .route("/vehicles/{id}", put(vehicles::update_vehicle))
-        .route("/vehicles/{id}", delete(vehicles::delete_vehicle))
+        .route("/api/vehicles", get(vehicles::list_vehicles))
+        .route("/api/vehicles/{id}", get(vehicles::get_vehicle))
+        .route("/api/vehicles", post(vehicles::create_vehicle))
+        .route("/api/vehicles/{id}", put(vehicles::update_vehicle))
+        .route("/api/vehicles/{id}", delete(vehicles::delete_vehicle))
 
         // Photos - All endpoints
-        .route("/vehicles/{id}/photos", post(photos::upload_photos))
-        .route("/vehicles/{id}/photos/{index}", delete(photos::delete_photo))
+        .route("/api/vehicles/{id}/photos", post(photos::upload_photos))
+        .route("/api/vehicles/{id}/photos/{index}", delete(photos::delete_photo))
 
         // Filters - All endpoints
-        .route("/filters/cities", get(filters::get_cities))
-        .route("/filters/brands", get(filters::get_brands))
-        .route("/filters/models", get(filters::get_models))
+        .route("/api/filters/cities", get(filters::get_cities))
+        .route("/api/filters/brands", get(filters::get_brands))
+        .route("/api/filters/models", get(filters::get_models))
         .layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
         .with_state(state);
 

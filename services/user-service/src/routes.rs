@@ -104,7 +104,7 @@ async fn health_check(State(pool): State<PgPool>) -> Json<HealthStatus> {
 /// Build JWT-Only CORS configuration untuk User Service
 fn configure_cors() -> CorsLayer {
     let frontend_urls = std::env::var("FRONTEND_URL")
-        .unwrap_or_else(|_| "http://localhost:5173".to_string());
+        .expect("FRONTEND_URL environment variable harus diset");
 
     let allowed_origins: Vec<HeaderValue> = frontend_urls
         .split(',')
