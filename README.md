@@ -50,9 +50,9 @@ Big Auto is a comprehensive vehicle marketplace platform that connects vehicle b
 
 | Service | Port | Status | Progress | Security | API Docs |
 |---------|------|--------|----------|----------|----------|
-| **Auth Service** | 3001 | ✅ Production Ready | 100% | ✅ JWT + Blacklist | [Swagger](http://localhost:3001/swagger-ui) |
-| **User Service** | 3002 | ✅ Production Ready | 100% | ✅ Rate Limited | [Swagger](http://localhost:3002/swagger-ui) |
-| **Vehicle Service** | 3003 | ✅ Production Ready | 100% | ✅ Secure Upload | [Swagger](http://localhost:3003/swagger-ui) |
+| **Auth Service** | 3001 | ✅ Production Ready | 100% | ✅ JWT + Blacklist | [Swagger](https://auth-services.zeabur.app/swagger-ui/) |
+| **User Service** | 3002 | ✅ Production Ready | 100% | ✅ Rate Limited | [Swagger](https://user-services.zeabur.app/swagger-ui/) |
+| **Vehicle Service** | 3003 | ✅ Production Ready | 100% | ✅ Secure Upload | [Swagger](https://vehicle-service.zeabur.app/swagger-ui/) |
 | **Booking Service** | 3004 | ✅ Production Ready | 100% | ✅ Calendar Security | [Swagger](http://localhost:3004/swagger-ui) |
 | **Payment Service** | 3005 | ✅ Production Ready | 100% | ✅ Midtrans HMAC | [Swagger](http://localhost:3005/swagger-ui) |
 | **Chat Service** | 3006 | ✅ Production Ready | 100% | ✅ WebSocket + JWT | [Swagger](http://localhost:3006/swagger-ui) |
@@ -356,16 +356,16 @@ curl http://localhost:3008/health  # Financial Service
 
 ### Swagger UI Endpoints
 
-| Service             | Port  | Swagger UI                                    |
-|---------------------|-------|-----------------------------------------------|
-| **Auth Service**    | 3001  | [Swagger](http://localhost:3001/swagger-ui)    |
-| **User Service**    | 3002  | [Swagger](http://localhost:3002/swagger-ui)    |
-| **Vehicle Service** | 3003  | [Swagger](http://localhost:3003/swagger-ui)    |
-| **Booking Service** | 3004  | [Swagger](http://localhost:3004/swagger-ui)    |
-| **Payment Service** | 3005  | [Swagger](http://localhost:3005/swagger-ui)    |
-| **Chat Service**    | 3006  | [Swagger](http://localhost:3006/swagger-ui)    |
-| **Notification**    | 3007  | [Swagger](http://localhost:3007/swagger-ui)    |
-| **Financial**       | 3008  | [Swagger](http://localhost:3008/swagger-ui)    |
+| Service             | Port  | Swagger UI                                               |
+|---------------------|-------|----------------------------------------------------------|
+| **Auth Service**    | 3001  | [Swagger](https://auth-services.zeabur.app/swagger-ui/)    |
+| **User Service**    | 3002  | [Swagger](https://user-services.zeabur.app/swagger-ui/)    |
+| **Vehicle Service** | 3003  | [Swagger](https://vehicle-service.zeabur.app/swagger-ui/)  |
+| **Booking Service** | 3004  | [Swagger](http://localhost:3004/swagger-ui)                |
+| **Payment Service** | 3005  | [Swagger](http://localhost:3005/swagger-ui)                |
+| **Chat Service**    | 3006  | [Swagger](http://localhost:3006/swagger-ui)                |
+| **Notification**    | 3007  | [Swagger](http://localhost:3007/swagger-ui)                |
+| **Financial**       | 3008  | [Swagger](http://localhost:3008/swagger-ui)                |
 
 ---
 
